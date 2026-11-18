@@ -1,113 +1,92 @@
 // Solmar City — keyboard and mouse input.
-// Tracks held keys, mouse orbit deltas and click-to-shoot, and owns pointer
-// lock so the mouse can orbit the third-person camera while playing.
+// Pointer lock for looking around, with a click-drag fallback for
+// browsers and headless runs where the lock is refused.
 
-export const keys = new Set();
+import { S } from './state.js';
 
-export const mouse = {
-  dx: 0, // accumulated orbit delta since the last frame
-  dy: 0,
+export const input = {
+  keys: new Set(),
+  lookDX: 0,
+  lookDY: 0,
+  mouseDown: false,
   dragging: false,
-  leftDown: false,
-  rightDown: false,
-  clicked: false, // a fresh left click this frame (for shooting)
+  locked: false,
+  clicked: false, // a fresh left click this frame
+  pressed: new Set(), // keys pressed this frame (edge-triggered)
 };
 
 let canvas = null;
-let pointerLocked = false;
+let lastX = 0;
+let lastY = 0;
 
-export function initInput(gameCanvas, onPauseKey, onInteractKey) {
-  canvas = gameCanvas;
+export function initInput(canvasEl) {
+  canvas = canvasEl;
 
-  window.addEventListener('keydown', (event) => {
-    if (event.repeat) return;
-    keys.add(event.code);
-    if (event.code === 'Escape' || event.code === 'KeyP') onPauseKey();
-    if (event.code === 'KeyE') onInteractKey();
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) {
-      event.preventDefault();
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    input.keys.add(e.code);
+    input.pressed.add(e.code);
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) {
+      e.preventDefault();
     }
   });
-  window.addEventListener('keyup', (event) => keys.delete(event.code));
-  window.addEventListener('blur', () => keys.clear());
-
-  canvas.addEventListener('mousedown', (event) => {
-    if (event.button === 0) {
-      mouse.leftDown = true;
-      mouse.clicked = true;
-      mouse.dragging = true;
-    }
-    if (event.button === 2) mouse.rightDown = true;
-    if (!pointerLocked) lockPointer();
-  });
-  window.addEventListener('mouseup', (event) => {
-    if (event.button === 0) {
-      mouse.leftDown = false;
-      mouse.dragging = false;
-    }
-    if (event.button === 2) mouse.rightDown = false;
-  });
-  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+  window.addEventListener('keyup', (e) => input.keys.delete(e.code));
+  window.addEventListener('blur', () => input.keys.clear());
 
   document.addEventListener('pointerlockchange', () => {
-    pointerLocked = document.pointerLockElement === canvas;
+    input.locked = document.pointerLockElement === canvas;
   });
-  document.addEventListener('mousemove', (event) => {
-    if (pointerLocked) {
-      mouse.dx += event.movementX;
-      mouse.dy += event.movementY;
-    } else if (mouse.dragging) {
-      mouse.dx += event.movementX;
-      mouse.dy += event.movementY;
+
+  canvas.addEventListener('click', () => {
+    if (S.mode !== 'playing') return;
+    if (!input.locked && canvas.requestPointerLock) {
+      try {
+        const p = canvas.requestPointerLock();
+        if (p && p.catch) p.catch(() => {});
+      } catch (err) {
+        /* pointer lock unavailable: drag-orbit fallback below */
+      }
     }
   });
+
+  canvas.addEventListener('mousedown', (e) => {
+    input.mouseDown = true;
+    input.dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (e.button === 0) input.clicked = true;
+  });
+  window.addEventListener('mouseup', () => {
+    input.mouseDown = false;
+    input.dragging = false;
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (input.locked) {
+      input.lookDX += e.movementX || 0;
+      input.lookDY += e.movementY || 0;
+    } else if (input.dragging) {
+      input.lookDX += e.clientX - lastX;
+      input.lookDY += e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+    }
+  });
+  // Keep the context menu from popping up over the game.
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
-export function lockPointer() {
-  if (!canvas) return;
-  try {
-    const result = canvas.requestPointerLock();
-    if (result && typeof result.catch === 'function') result.catch(() => {});
-  } catch (error) {
-    // Headless browsers and some desktops refuse pointer lock; drag-orbit
-    // still works, so a refusal is never fatal.
-  }
+/** Consume this frame's edge-triggered input. Call once per frame. */
+export function endFrameInput() {
+  input.lookDX = 0;
+  input.lookDY = 0;
+  input.clicked = false;
+  input.pressed.clear();
 }
 
-export function unlockPointer() {
-  try {
-    if (document.pointerLockElement) document.exitPointerLock();
-  } catch (error) {
-    // Ignore: leaving pointer lock is best-effort.
-  }
+export function keyDown(code) {
+  return input.keys.has(code);
 }
 
-export function consumeMouseDelta() {
-  const out = { dx: mouse.dx, dy: mouse.dy };
-  mouse.dx = 0;
-  mouse.dy = 0;
-  return out;
-}
-
-export function consumeClick() {
-  const wasClicked = mouse.clicked;
-  mouse.clicked = false;
-  return wasClicked;
-}
-
-export function isDown(code) {
-  return keys.has(code);
-}
-
-export function isRightDown() {
-  return mouse.rightDown;
-}
-
-export function anyMoveKey() {
-  return (
-    keys.has('KeyW') || keys.has('ArrowUp') ||
-    keys.has('KeyS') || keys.has('ArrowDown') ||
-    keys.has('KeyA') || keys.has('ArrowLeft') ||
-    keys.has('KeyD') || keys.has('ArrowRight')
-  );
+export function keyPressed(code) {
+  return input.pressed.has(code);
 }

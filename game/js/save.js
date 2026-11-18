@@ -1,73 +1,59 @@
-// Solmar City — saving and loading.
-// Progress (cash, missions, health, ammo, position) lives in localStorage
-// under one key. Nothing else persists: the city, traffic and police are
-// rebuilt fresh on every load, which keeps a save small and honest.
+// Solmar City — saving: the game autosaves to localStorage and the
+// start menu offers Continue when a save exists.
 
-import { state } from './state.js';
+import { S } from './state.js';
+import { player } from './player.js';
 
-const SAVE_KEY = 'solmar-city-save-v1';
+export const SAVE_KEY = 'solmar-city-save-v2';
 
 export function saveGame() {
   try {
     const data = {
-      version: 1,
-      cash: state.cash,
-      health: state.health,
-      ammo: state.ammo,
-      magazine: state.magazine,
-      missionsCompleted: state.missionsCompleted,
-      missionIndex: state.missionIndex,
-      freeRoam: state.freeRoam,
-      carsStolen: state.carsStolen,
-      playerX: state.player.x,
-      playerZ: state.player.z,
-      playerHeading: state.player.heading,
-      savedAt: Date.now(),
+      version: S.version,
+      cash: S.cash,
+      health: S.health,
+      magazine: S.magazine,
+      reserve: S.reserve,
+      missionsCompleted: S.missionsCompleted,
+      missionIndex: S.missionIndex,
+      x: player.pos.x,
+      z: player.pos.z,
+      heading: player.heading,
+      time: S.time,
     };
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
-  } catch (error) {
+  } catch (err) {
     return false;
   }
 }
 
-export function loadSaveData() {
+export function loadSave() {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || data.version !== 1) return null;
+    if (!data || data.version !== S.version) return null;
     return data;
-  } catch (error) {
+  } catch (err) {
     return null;
   }
 }
 
 export function hasSave() {
-  return loadSaveData() !== null;
+  return loadSave() !== null;
 }
 
-export function applySaveData(data) {
-  state.cash = data.cash || 0;
-  state.health = data.health || 100;
-  state.ammo = data.ammo || 0;
-  state.magazine = data.magazine || 12;
-  state.missionsCompleted = data.missionsCompleted || 0;
-  state.missionIndex = data.missionIndex || 0;
-  state.freeRoam = !!data.freeRoam;
-  state.carsStolen = data.carsStolen || 0;
-  state.player.x = typeof data.playerX === 'number' ? data.playerX : 0;
-  state.player.z = typeof data.playerZ === 'number' ? data.playerZ : 24;
-  state.player.heading = typeof data.playerHeading === 'number' ? data.playerHeading : Math.PI;
-  state.player.onFoot = true;
-  state.player.inCar = null;
-  state.wantedHeat = 0;
-}
-
-export function clearSave() {
-  try {
-    window.localStorage.removeItem(SAVE_KEY);
-  } catch (error) {
-    // Storage may be unavailable; a missing save is not fatal.
+export function applySave(data) {
+  S.cash = data.cash || 0;
+  S.health = data.health ?? 100;
+  S.magazine = data.magazine ?? 12;
+  S.reserve = data.reserve ?? 60;
+  S.missionsCompleted = data.missionsCompleted || 0;
+  if (typeof data.x === 'number' && typeof data.z === 'number') {
+    player.pos.set(data.x, 0, data.z);
+    player.heading = data.heading || 0;
+    player.camYaw = player.heading + Math.PI;
+    player.group.position.copy(player.pos);
   }
 }
