@@ -1,158 +1,194 @@
-// Solmar City — the police: wanted heat becomes stars, cruisers spawn
-// and chase the player, ramming their car, and on foot a cruiser that
-// corners the player makes the bust. Heat cools off when the player
-// lies low.
+// Solmar City — wanted level, police cruisers, BUSTED (v3 rewrite).
+// Cruisers are faster than the player now (32 + 1.5/star vs the player's 34),
+// so a chase stays a chase; their light bars flash red/blue with glow halos.
 
-import * as THREE from 'three';
-import { S, WORLD, ROAD_LINES, clamp, addShake } from './state.js';
-import { makeCar, placeCar } from './vehicles.js';
-import { player } from './player.js';
+import * as THREE from '../vendor/three.module.min.js';
+import { S, WORLD, starsFromHeat, addHeat, dist2, clamp } from './state.js';
+import { makeCar } from './vehicles.js';
+import { resolveCollisions, attachBlob } from './city.js';
 
-let sceneRef = null;
 let spawnTimer = 0;
 
-/** How many cruisers the current star level calls for. */
-export function wantedCruiserCount() {
-  return Math.min(S.stars, 5);
+export function wantedStars() {
+  return starsFromHeat(S.heat);
 }
 
-export function buildPolice(scene) {
-  sceneRef = scene;
-  S.cruisers = [];
+export function spawnCruiser(nearX, nearZ) {
+  const mesh = makeCar(0, true);
+  // Spawn ~50 m away, on a road if possible.
+  const angle = Math.random() * Math.PI * 2;
+  let x = nearX + Math.sin(angle) * 50;
+  let z = nearZ + Math.cos(angle) * 50;
+  x = clamp(x, -170, 170);
+  z = clamp(z, -170, 170);
+  mesh.position.set(x, 0, z);
+  const heading = Math.atan2(nearX - x, nearZ - z);
+  mesh.rotation.y = heading;
+  S.scene.add(mesh);
+  attachBlob(mesh, 4.8, 0.03);
+  const cruiser = { mesh, heading, speed: 12, targetSpeed: 20, flashPhase: Math.random() * 6 };
+  S.cruisers.push(cruiser);
+  return cruiser;
 }
 
-function spawnCruiser() {
-  const car = makeCar(0x111111, true);
-  car.driver = 'police';
-  // Appear on a road a little way from the player.
-  const px = S.car ? S.car.group.position.x : player.pos.x;
-  const pz = S.car ? S.car.group.position.z : player.pos.z;
-  const line = ROAD_LINES[Math.floor(Math.random() * ROAD_LINES.length)];
-  const along = clamp((Math.random() < 0.5 ? px : pz) + (Math.random() < 0.5 ? -50 : 50), -170, 170);
-  const horizontal = Math.random() < 0.5;
-  if (horizontal) {
-    placeCar(sceneRef, car, along, line, Math.random() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
-  } else {
-    placeCar(sceneRef, car, line, along, Math.random() < 0.5 ? 0 : Math.PI);
-  }
-  car.speed = 0;
-  car.flashPhase = Math.random() * 10;
-  S.cruisers.push(car);
-  return car;
-}
-
-export function ensureCruisers(instant = false) {
-  const want = wantedCruiserCount();
-  while (S.cruisers.length < want) {
-    spawnCruiser();
-    if (!instant) break;
-  }
-}
-
-function removeCruiser(car) {
-  sceneRef.remove(car.group);
-  const i = S.cruisers.indexOf(car);
+function removeCruiser(cruiser) {
+  S.scene.remove(cruiser.mesh);
+  const i = S.cruisers.indexOf(cruiser);
   if (i >= 0) S.cruisers.splice(i, 1);
 }
 
-function chaseCruiser(car, dt) {
-  const target = S.car ? S.car.group.position : player.pos;
-  const p = car.group.position;
-  const dx = target.x - p.x;
-  const dz = target.z - p.z;
-  const dist = Math.hypot(dx, dz) || 1;
-
-  // Steer toward the player, faster with more stars.
-  const wantHeading = Math.atan2(dx, dz);
-  let diff = wantHeading - car.heading;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  car.heading += clamp(diff, -2.6 * dt, 2.6 * dt);
-
-  const top = 26 + S.stars * 1.5;
-  const accel = dist > 30 ? 16 : 10;
-  if (!S.car && dist < 5.5) {
-    // On foot, the cruiser pulls up alongside the player and stops —
-    // that is what makes the bust.
-    car.speed = Math.max(0, car.speed - 34 * dt);
-  } else {
-    car.speed = Math.min(top, car.speed + accel * dt);
-    // Ease off when right on top of the player so the ram reads.
-    if (dist < 6) car.speed = Math.min(car.speed, 12);
-  }
-
-  const f = { x: Math.sin(car.heading), z: Math.cos(car.heading) };
-  p.x += f.x * car.speed * dt;
-  p.z += f.z * car.speed * dt;
-  p.x = clamp(p.x, -WORLD.half, WORLD.half);
-  p.z = clamp(p.z, -WORLD.half, WORLD.half);
-  car.group.rotation.y = car.heading;
-
-  // Ram the player's car: shove it and slow the cruiser.
-  if (S.car && dist < 4.4) {
-    const push = 9 * dt;
-    S.car.group.position.x += f.x * push;
-    S.car.group.position.z += f.z * push;
-    S.car.speed *= 1 - 0.5 * dt;
-    car.speed *= 0.6;
-    if (Math.abs(S.car.speed) > 8) {
-      addShake(0.12, 0.2);
-      S.hooks.onCrash?.(Math.abs(S.car.speed));
-    }
-  }
-
-  // Flashing light bar: red and blue take turns.
-  car.flashPhase += dt * 6;
-  const redOn = Math.sin(car.flashPhase) > 0;
-  if (car.lightL) car.lightL.material.color.setHex(redOn ? 0xff2222 : 0x551111);
-  if (car.lightR) car.lightR.material.color.setHex(redOn ? 0x111155 : 0x2244ff);
-}
-
 export function updatePolice(dt) {
-  // Heat cools off once the player has lain low for a while.
-  if (S.wantedHeat > 0 && S.time - S.lastHeatGain > 6) {
-    S.wantedHeat = Math.max(0, S.wantedHeat - 2 * dt);
-    S.stars = S.wantedHeat <= 0 ? 0 : S.stars;
-    if (S.wantedHeat <= 0) S.stars = 0;
+  const stars = wantedStars();
+  // Heat cools off when the player lies low.
+  if (stars > 0) {
+    const moving = S.onFoot ? (S.player && S.player.speed > 1) : !!S.currentCar;
+    addHeat(-dt * (moving ? 0.9 : 1.8));
   }
-
-  const want = wantedCruiserCount();
   spawnTimer -= dt;
-  if (S.cruisers.length < want && spawnTimer <= 0) {
-    spawnCruiser();
+  const want = stars === 0 ? 0 : Math.min(stars + 1, 5);
+  if (stars > 0 && S.cruisers.length < want && spawnTimer <= 0 && !S.debug.pacing) {
     spawnTimer = 1.2;
+    const px = S.player.pos.x;
+    const pz = S.player.pos.z;
+    spawnCruiser(px, pz);
   }
-  while (S.cruisers.length > want) {
-    removeCruiser(S.cruisers[S.cruisers.length - 1]);
+  if (stars === 0 && S.cruisers.length > 0 && Math.random() < dt * 0.3) {
+    removeCruiser(S.cruisers[0]);
   }
 
-  for (const car of S.cruisers) chaseCruiser(car, dt);
-
-  // BUSTED: on foot, a cruiser sits on the player while they dawdle.
-  if (S.onFoot && S.stars > 0) {
-    let close = false;
-    for (const car of S.cruisers) {
-      const d = Math.hypot(
-        car.group.position.x - player.pos.x,
-        car.group.position.z - player.pos.z,
-      );
-      if (d < 4.5) close = true;
-    }
-    if (close && player.speed < 2) {
-      S.bustedTimer += dt;
-      if (S.bustedTimer > 2.5) S.hooks.onBusted?.();
+  const px = S.player.pos.x;
+  const pz = S.player.pos.z;
+  const topSpeed = WORLD.cruiserBaseSpeed + stars * WORLD.cruiserPerStar;
+  for (const c of [...S.cruisers]) {
+    const mx = c.mesh.position.x;
+    const mz = c.mesh.position.z;
+    const d = dist2(mx, mz, px, pz);
+    let wantHeading;
+    let target = topSpeed;
+    if (S.debug.pacing && c.pace && S.currentCar) {
+      // Formation pacing (staged chase shot): hold a fixed slot beside the
+      // player's car and match its speed instead of converging and ramming.
+      const car = S.currentCar;
+      const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+      const rx = Math.cos(car.heading), rz = -Math.sin(car.heading);
+      const tx = car.mesh.position.x + fx * c.pace.fwd + rx * c.pace.side;
+      const tz = car.mesh.position.z + fz * c.pace.fwd + rz * c.pace.side;
+      wantHeading = Math.atan2(tx - mx, tz - mz);
+      // Signed along-track error: positive when behind the slot, negative
+      // when ahead of it, so the cruiser speeds up to close a gap and eases
+      // off instead of overshooting past the slot.
+      const err = (tx - mx) * fx + (tz - mz) * fz;
+      target = Math.max(8, Math.min(42, car.speed + err * 0.8));
     } else {
-      S.bustedTimer = Math.max(0, S.bustedTimer - dt * 2);
+      // Steer toward the player, with a little weave so cruisers flank.
+      wantHeading = Math.atan2(px - mx, pz - mz) + Math.sin(S.time * 0.7 + c.flashPhase) * 0.25;
+      // Slow down right beside an on-foot player so the bust can happen.
+      if (S.onFoot && d < 7) target = 0;
+      else if (d < 5) target = Math.min(target, 6);
+    }
+    let dh = wantHeading - c.heading;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    c.heading += clamp(dh, -1.6 * dt, 1.6 * dt);
+    c.speed += (target - c.speed) * Math.min(1, dt * 1.6);
+    c.mesh.position.x += Math.sin(c.heading) * c.speed * dt;
+    c.mesh.position.z += Math.cos(c.heading) * c.speed * dt;
+    resolveCollisions(c.mesh.position, 1.9);
+    c.mesh.rotation.y = c.heading;
+    for (const w of c.mesh.userData.wheels) w.rotation.x += c.speed * dt * 2.4;
+    // Ram the player's car on contact (heat only once per 2 s per cruiser).
+    // Never while pacing in formation for the staged shot.
+    if (S.currentCar && !(S.debug.pacing && c.pace)) {
+      const cd = dist2(mx, mz, S.currentCar.mesh.position.x, S.currentCar.mesh.position.z);
+      if (cd < 4.2) {
+        S.currentCar.speed *= 0.86;
+        if (S.audio) S.audio.crash();
+        if (!c.lastRam || S.time - c.lastRam > 2) {
+          c.lastRam = S.time;
+          addHeat(1.5);
+        }
+      }
+    }
+    // Flashing light bar: alternate red / blue, glow sprites pulse with it.
+    c.flashPhase += dt * 7;
+    const redOn = Math.sin(c.flashPhase) > 0;
+    const ud = c.mesh.userData;
+    if (ud.redLens) {
+      ud.redLens.material.color.setHex(redOn ? 0xff2a2a : 0x5a1414);
+      ud.blueLens.material.color.setHex(redOn ? 0x142a5a : 0x2a6aff);
+      ud.redGlow.material.opacity = redOn ? 0.95 : 0.12;
+      ud.blueGlow.material.opacity = redOn ? 0.12 : 0.95;
+    }
+    if (S.audio && d < 60) S.audio.siren(d);
+  }
+
+  // BUSTED: cornered on foot at high stars.
+  if (S.onFoot && stars >= 3 && S.mode === 'playing') {
+    let near = false;
+    for (const c of S.cruisers) {
+      if (dist2(c.mesh.position.x, c.mesh.position.z, px, pz) < 6 && c.speed < 2) near = true;
+    }
+    if (near) {
+      S.bustTimer += dt;
+      if (S.bustTimer > 2.5) triggerBusted();
+    } else {
+      S.bustTimer = Math.max(0, S.bustTimer - dt * 2);
     }
   } else {
-    S.bustedTimer = 0;
+    S.bustTimer = 0;
   }
 }
 
-/** Clear the wanted level (after a bust, or when a mission demands it). */
-export function clearWanted() {
-  S.wantedHeat = 0;
-  S.stars = 0;
-  S.bustedTimer = 0;
-  while (S.cruisers.length > 0) removeCruiser(S.cruisers[0]);
+export function triggerBusted() {
+  S.mode = 'busted';
+  S.bustedAt = S.time;
+  S.heat = 0;
+  S.bustTimer = 0;
+  for (const c of [...S.cruisers]) removeCruiser(c);
+  if (S.currentCar) {
+    S.currentCar.driver = null;
+    S.currentCar = null;
+  }
+  S.onFoot = true;
+  const p = S.player;
+  p.group.visible = true;
+  // Respawn at Solmar General hospital.
+  p.pos.x = 120;
+  p.pos.z = -28;
+  p.group.position.set(120, 0, -28);
+  p.heading = Math.PI;
+  p.speed = 0;
+  S.health = 100;
+  if (S.audio) S.audio.busted();
+}
+
+// A standing police officer figure (dark blue, cap) for the street scene.
+export function makeOfficer(x, z, heading) {
+  const g = new THREE.Group();
+  const navy = new THREE.MeshLambertMaterial({ color: 0x1c2a4a });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.7, 0.32), navy);
+  torso.position.y = 1.1;
+  g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 8), skin);
+  head.position.y = 1.7;
+  g.add(head);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.27, 0.1, 10), navy);
+  cap.position.y = 1.9;
+  g.add(cap);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.72, 0.22), navy);
+  legL.position.set(-0.15, 0.36, 0);
+  g.add(legL);
+  const legR = legL.clone();
+  legR.position.x = 0.15;
+  g.add(legR);
+  // Badge: small gold square on the chest.
+  const badge = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0xffd94a }));
+  badge.position.set(-0.14, 1.25, 0.17);
+  g.add(badge);
+  g.position.set(x, 0, z);
+  g.rotation.y = heading;
+  S.scene.add(g);
+  attachBlob(g, 1.5, 0.03);
+  return g;
 }

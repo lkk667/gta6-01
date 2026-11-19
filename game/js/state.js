@@ -1,75 +1,28 @@
-// Solmar City — shared state, constants and helpers.
-// Every module reads and writes this one object, so the whole game
-// agrees on cash, health, ammo, wanted heat and the current mission.
+// Solmar City — shared state (v3 rewrite).
+// One mutable world object every system reads and writes. No network, no
+// imports from other game modules: this file stands alone.
 
-export const VERSION = '2.0.0-solmar';
-
-// World layout: a road grid, blocks between the roads, a beach on the
-// south edge and the ocean beyond it. All units are metres-ish.
 export const WORLD = {
-  half: 190, // playable area runs -190..190 on both axes
-  roadGap: 40, // roads sit on multiples of 40
-  roadHalf: 6, // half-width of a road
-  beachZ: 168, // sand starts here
-  oceanZ: 196, // water starts here
-  topSpeed: 34, // units per second, about 122 km/h
-  walkSpeed: 6,
-  runSpeed: 10.5,
+  size: 380,
+  half: 190,
+  roadGap: 40,
+  roads: [-160, -120, -80, -40, 0, 40, 80, 120, 160],
+  playerTopSpeed: 34, // units per second on the road
+  cruiserBaseSpeed: 32, // cruisers keep pace with (and can catch) the player
+  cruiserPerStar: 1.5,
 };
 
-// Roads run on these lines (both axes).
-export const ROAD_LINES = [-160, -120, -80, -40, 0, 40, 80, 120, 160];
-
-// Fixed landmark blocks, by block centre (blocks sit between roads).
 export const LANDMARKS = {
-  solmarTower: { x: -60, z: -60 },
-  cafeLuna: { x: 60, z: 20 },
-  hideout: { x: -140, z: 140 },
-  harbor: { x: 140, z: 176 },
-  hospital: { x: -100, z: 60 },
-  parkA: { x: 20, z: -60 },
-  parkB: { x: -20, z: 100 },
-  carParkA: { x: 100, z: -100 },
-  carParkB: { x: -60, z: -140 },
+  hideout: { x: -120, z: 120, label: 'the Hideout' },
+  marinaPark: { x: 40, z: 40, label: 'Marina Park' },
+  cafeLuna: { x: -40, z: -40, label: 'Cafe Luna' },
+  solmarTower: { x: 80, z: -120, label: 'Solmar Tower' },
+  harbor: { x: 0, z: 168, label: 'Solmar Harbor' },
+  hospital: { x: 120, z: -40, label: 'Solmar General' },
+  plaza: { x: 0, z: 0, label: 'Marina Plaza' },
 };
 
-// Small helpers -------------------------------------------------------------
-export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
-export const lerp = (a, b, t) => a + (b - a) * t;
-export const dist2d = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
-export const angleLerp = (a, b, t) => {
-  let d = b - a;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
-};
-export const fmtCash = (n) => '$' + Math.round(n).toLocaleString('en-US');
-
-/** Deterministic random, so the city looks the same on every load. */
-export function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Wanted stars from heat: 0 heat is clean, 20 heat is 2 stars, 100 is 5. */
-export function starsFromHeat(heat) {
-  if (heat <= 0) return 0;
-  if (heat < 20) return 1;
-  if (heat < 40) return 2;
-  if (heat < 60) return 3;
-  if (heat < 80) return 4;
-  return 5;
-}
-
-/** The one shared game state. Modules mutate its fields directly. */
 export const S = {
-  version: VERSION,
   mode: 'menu', // 'menu' | 'playing' | 'busted'
   time: 0,
   cash: 0,
@@ -78,71 +31,100 @@ export const S = {
   magazine: 12,
   magSize: 12,
   reserve: 60,
-  weapon: 'pistol', // 'pistol' | 'fist'
-  wantedHeat: 0,
-  stars: 0,
-  lastHeatGain: -100,
+  heat: 0, // 0..100, maps to 0..5 stars
   missionsCompleted: 0,
-  missionIndex: -1,
-  mission: null, // active mission runtime object
-  missionStage: 0,
-  objective: 'Welcome to Solmar City',
-  objectiveDist: 0,
-  speedKmh: 0,
+  missionIndex: 0,
+  missionStage: 0, // per-mission sub-stage (e.g. 0 = steal a car, 1 = drive to garage)
+  objectiveText: '',
+  objectiveDist: null, // metres to the current target, null = show no distance
   onFoot: true,
-  busted: false,
-  bustedTimer: 0,
-  muted: false,
-  // Player / driving
-  player: null, // set by player.js: { pos, heading, speed, ... }
-  car: null, // the car the player is driving, or null
-  stolenCar: false,
-  // World entities, filled by their modules
-  colliders: [], // { minX, maxX, minZ, maxZ }
+  speedKmh: 0,
+  bustTimer: 0,
+  bustedAt: null,
+  // three.js handles, filled in by main.js / builders
+  scene: null,
+  camera: null,
+  renderer: null,
+  clock: null,
+  player: null, // { group, body, head, gun, flash, pos: {x,z}, heading, speed, ... }
+  cars: [], // parked + stolen drivable cars (vehicles.js records)
   trafficCars: [],
   peds: [],
   cruisers: [],
   pickups: [],
-  drops: [], // mission 4 collectibles
-  // Toasts: { text, until, big }
+  colliders: [], // { x, z, r } circles the player and cars must not enter
+  beacon: null, // { group, ring, pillar, gem, target: {x,z} }
   toasts: [],
-  // Camera shake: { t, mag }
-  shake: { t: 0, mag: 0 },
-  // Staging / debug helpers
-  debug: {
-    holdFlashUntil: 0,
-    autoDrive: false,
-    staged: null,
-    longRewardToast: false,
-  },
-  // Live hooks filled in by main.js
-  hooks: {},
+  toastSeq: 0,
+  keys: {},
+  mouseDX: 0,
+  mouseDY: 0,
+  camYaw: Math.PI * 0.75,
+  camPitch: 0.32,
+  camDist: 9.5,
+  pointerLocked: false,
+  dragOrbit: false,
+  muted: false,
+  audio: null,
+  debug: { longRewardToast: false, holdFlash: false, staged: null },
+  saveLoaded: false,
+  version: 3,
 };
 
-export function addHeat(n) {
-  S.wantedHeat = clamp(S.wantedHeat + n, 0, 100);
-  S.stars = starsFromHeat(S.wantedHeat);
-  if (n > 0) S.lastHeatGain = S.time;
+export function starsFromHeat(heat) {
+  if (heat <= 0) return 0;
+  if (heat < 20) return 1;
+  if (heat < 40) return 2;
+  if (heat < 60) return 3;
+  if (heat < 85) return 4;
+  return 5;
 }
 
-export function setHeat(n) {
-  S.wantedHeat = clamp(n, 0, 100);
-  S.stars = starsFromHeat(S.wantedHeat);
-  if (n > 0) S.lastHeatGain = S.time;
+export function addHeat(amount) {
+  S.heat = Math.max(0, Math.min(100, S.heat + amount));
 }
 
-export function addCash(n) {
-  S.cash += n;
-  return S.cash;
+export function clearToasts() {
+  S.toasts.length = 0;
 }
 
-/** Show a toast line. `seconds` defaults to 4; toasts fade on their own. */
-export function toast(text, seconds = 4, big = false) {
-  S.toasts.push({ text, until: S.time + seconds, big });
+// Push a banner. `life` seconds, default 5. Oldest banners drop past 4.
+export function toast(text, sub, life) {
+  const now = S.time;
+  const entry = {
+    id: ++S.toastSeq,
+    text,
+    sub: sub || '',
+    until: now + (life === undefined ? 5 : life),
+  };
+  S.toasts.push(entry);
   if (S.toasts.length > 4) S.toasts.shift();
+  return entry;
 }
 
-export function addShake(mag, dur = 0.25) {
-  S.shake.mag = Math.max(S.shake.mag, mag);
-  S.shake.t = Math.max(S.shake.t, dur);
+// Deterministic PRNG so the city layout is stable between runs.
+export function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+export function dist2(ax, az, bx, bz) {
+  const dx = ax - bx;
+  const dz = az - bz;
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+// Nearest road coordinate to a value (roads every 40 units).
+export function nearestRoad(v) {
+  return Math.round(v / WORLD.roadGap) * WORLD.roadGap;
 }

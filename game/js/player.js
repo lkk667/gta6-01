@@ -1,196 +1,206 @@
-// Solmar City — the on-foot player: a simple character with a walk/run
-// cycle, and the third-person mouse-orbit camera that follows them
-// (or the car they are driving).
+// Solmar City — on-foot character and third-person camera (v3 rewrite).
+// Over-shoulder framing: the camera and its look target are both shifted
+// sideways so the character sits left of centre and the crosshair clears
+// the head, aiming past the right shoulder into open view.
 
-import * as THREE from 'three';
-import { S, WORLD, clamp, angleLerp } from './state.js';
-import { collideCircle } from './city.js';
-import { input } from './input.js';
+import * as THREE from '../vendor/three.module.min.js';
+import { S, clamp } from './state.js';
+import { resolveCollisions, attachBlob } from './city.js';
 
-export const player = {
-  pos: new THREE.Vector3(0, 0, 24),
-  heading: Math.PI, // facing north (-z) at spawn
-  speed: 0,
-  moving: false,
-  walkPhase: 0,
-  camYaw: 0, // behind the player at spawn (heading PI faces -z)
-  camPitch: 0.32,
-  camDist: 7.5,
-  group: null,
-  legL: null,
-  legR: null,
-  armL: null,
-  armR: null,
-  gun: null,
-};
+const WALK_SPEED = 6;
+const RUN_SPEED = 10;
 
-function makeCharacter() {
-  const g = new THREE.Group();
+export function buildPlayer() {
+  const group = new THREE.Group();
   const skin = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
-  const shirt = new THREE.MeshLambertMaterial({ color: 0x2fa8a0 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2c3e55 });
-  const hair = new THREE.MeshLambertMaterial({ color: 0x2a2018 });
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x2a7ab8 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
+  const shoes = new THREE.MeshLambertMaterial({ color: 0xf2f2f2 });
 
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.34), shirt);
   torso.position.y = 1.12;
-  g.add(torso);
-
+  group.add(torso);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), skin);
   head.position.y = 1.72;
-  g.add(head);
-  const hairTop = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), hair);
-  hairTop.position.y = 1.76;
-  g.add(hairTop);
+  group.add(head);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.28, 0.1, 12), new THREE.MeshLambertMaterial({ color: 0xe84a4a }));
+  cap.position.y = 1.92;
+  group.add(cap);
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.04, 0.28), new THREE.MeshLambertMaterial({ color: 0xe84a4a }));
+  brim.position.set(0, 1.88, 0.3);
+  group.add(brim);
 
-  const legGeo = new THREE.BoxGeometry(0.24, 0.72, 0.26);
-  const legL = new THREE.Mesh(legGeo, pants);
-  legL.geometry = legGeo.clone();
-  legL.geometry.translate(0, -0.36, 0);
-  legL.position.set(-0.16, 0.74, 0);
-  g.add(legL);
-  const legR = new THREE.Mesh(legGeo, pants);
-  legR.geometry = legGeo.clone();
-  legR.geometry.translate(0, -0.36, 0);
-  legR.position.set(0.16, 0.74, 0);
-  g.add(legR);
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.78, 0.24), pants);
+  legL.position.set(-0.17, 0.39, 0);
+  group.add(legL);
+  const legR = legL.clone();
+  legR.position.x = 0.17;
+  group.add(legR);
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.66, 0.2), shirt);
+  armL.position.set(-0.42, 1.14, 0);
+  group.add(armL);
+  const armR = armL.clone();
+  armR.position.x = 0.42;
+  group.add(armR);
+  const footL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.34), shoes);
+  footL.position.set(-0.17, 0.05, 0.05);
+  group.add(footL);
+  const footR = footL.clone();
+  footR.position.x = 0.17;
+  group.add(footR);
 
-  const armGeo = new THREE.BoxGeometry(0.18, 0.62, 0.2);
-  const armL = new THREE.Mesh(armGeo, shirt);
-  armL.geometry = armGeo.clone();
-  armL.geometry.translate(0, -0.31, 0);
-  armL.position.set(-0.42, 1.42, 0);
-  g.add(armL);
-  const armR = new THREE.Mesh(armGeo, shirt);
-  armR.geometry = armGeo.clone();
-  armR.geometry.translate(0, -0.31, 0);
-  armR.position.set(0.42, 1.42, 0);
-  g.add(armR);
-
-  // Pistol held in the right hand, visible while on foot.
+  // Pistol in the right hand, held forward. The muzzle flash is a child of
+  // this gun mesh, so flash and gun can never drift apart on screen.
+  const gunMat = new THREE.MeshLambertMaterial({ color: 0x1c1e22 });
   const gun = new THREE.Group();
-  const barrel = new THREE.Mesh(
-    new THREE.BoxGeometry(0.07, 0.09, 0.42),
-    new THREE.MeshLambertMaterial({ color: 0x1c1c22 }),
-  );
-  barrel.position.set(0, 0, 0.18);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.46), gunMat);
+  barrel.position.z = 0.18;
   gun.add(barrel);
-  const grip = new THREE.Mesh(
-    new THREE.BoxGeometry(0.07, 0.2, 0.1),
-    new THREE.MeshLambertMaterial({ color: 0x1c1c22 }),
-  );
-  grip.position.set(0, -0.1, -0.02);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.24, 0.12), gunMat);
+  grip.position.set(0, -0.14, -0.02);
   gun.add(grip);
-  gun.position.set(0.42, 1.12, 0.28);
-  g.add(gun);
+  gun.position.set(0.42, 1.05, 0.3);
+  group.add(gun);
 
-  player.legL = legL;
-  player.legR = legR;
-  player.armL = armL;
-  player.armR = armR;
-  player.gun = gun;
-  player.group = g;
-  return g;
+  // Muzzle flash: starburst cone + halo, bound to the gun barrel tip.
+  const flashMat = new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0 });
+  const flashCone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.85, 6), flashMat);
+  flashCone.rotation.x = Math.PI / 2;
+  flashCone.position.z = 0.75;
+  gun.add(flashCone);
+  const flashHalo = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), flashMat);
+  flashHalo.position.z = 0.55;
+  gun.add(flashHalo);
+  const flashLight = new THREE.PointLight(0xffc832, 0, 9);
+  flashLight.position.z = 0.7;
+  gun.add(flashLight);
+
+  group.position.set(0, 0, -8);
+  S.scene.add(group);
+  attachBlob(group, 1.6, 0.03);
+
+  S.player = {
+    group, torso, head, legL, legR, armL, armR, gun, flashMat, flashLight,
+    pos: group.position, // THREE.Vector3, x/z are the ground position
+    heading: 0,
+    speed: 0,
+    walkPhase: 0,
+    weapon: 'pistol', // 'pistol' | 'fists'
+    punchTimer: 0,
+    flashTimer: 0,
+  };
+  return S.player;
 }
 
-export function buildPlayer(scene) {
-  const g = makeCharacter();
-  g.position.copy(player.pos);
-  scene.add(g);
-  S.player = player;
-  return player;
+function moveKeys() {
+  const k = S.keys;
+  return {
+    fwd: (k.KeyW || k.ArrowUp) ? 1 : 0,
+    back: (k.KeyS || k.ArrowDown) ? 1 : 0,
+    left: (k.KeyA || k.ArrowLeft) ? 1 : 0,
+    right: (k.KeyD || k.ArrowRight) ? 1 : 0,
+    run: !!k.ShiftLeft || !!k.ShiftRight,
+  };
 }
 
-/** Move the player on foot. Returns nothing; updates pos, heading, speed. */
 export function updatePlayer(dt) {
-  // Camera orbit from the mouse.
-  player.camYaw -= input.lookDX * 0.0032;
-  player.camPitch = clamp(player.camPitch + input.lookDY * 0.0026, -0.15, 1.1);
-
-  let fx = 0;
-  let fz = 0;
-  if (input.keys.has('KeyW') || input.keys.has('ArrowUp')) fz -= 1;
-  if (input.keys.has('KeyS') || input.keys.has('ArrowDown')) fz += 1;
-  if (input.keys.has('KeyA') || input.keys.has('ArrowLeft')) fx -= 1;
-  if (input.keys.has('KeyD') || input.keys.has('ArrowRight')) fx += 1;
-
-  const running = input.keys.has('ShiftLeft') || input.keys.has('ShiftRight');
-  const targetSpeed = fx === 0 && fz === 0 ? 0 : running ? WORLD.runSpeed : WORLD.walkSpeed;
-  player.speed = targetSpeed;
-  player.moving = targetSpeed > 0;
-
-  if (player.moving) {
-    // Move relative to the camera yaw: W walks away from the camera,
-    // D strafes to the camera's right.
-    const moveF = -fz;
-    const moveR = fx;
-    const sin = Math.sin(player.camYaw);
-    const cos = Math.cos(player.camYaw);
-    let mx = moveF * -sin + moveR * cos;
-    let mz = moveF * -cos + moveR * -sin;
-    const len = Math.hypot(mx, mz) || 1;
-    mx /= len;
-    mz /= len;
-    player.pos.x += mx * targetSpeed * dt;
-    player.pos.z += mz * targetSpeed * dt;
-    player.pos.x = clamp(player.pos.x, -WORLD.half, WORLD.half);
-    player.pos.z = clamp(player.pos.z, -WORLD.half, WORLD.half + 8);
-    collideCircle(player.pos, 0.55);
-    player.heading = angleLerp(player.heading, Math.atan2(mx, mz), Math.min(1, dt * 12));
-    player.walkPhase += dt * targetSpeed * 1.6;
+  const p = S.player;
+  if (!p) return;
+  const mv = moveKeys();
+  const camFwdX = -Math.sin(S.camYaw);
+  const camFwdZ = -Math.cos(S.camYaw);
+  const camRightX = Math.cos(S.camYaw);
+  const camRightZ = -Math.sin(S.camYaw);
+  let ix = camFwdX * (mv.fwd - mv.back) + camRightX * (mv.right - mv.left);
+  let iz = camFwdZ * (mv.fwd - mv.back) + camRightZ * (mv.right - mv.left);
+  const len = Math.hypot(ix, iz);
+  const target = mv.run ? RUN_SPEED : WALK_SPEED;
+  if (len > 0.01) {
+    ix /= len;
+    iz /= len;
+    p.speed += (target - p.speed) * Math.min(1, dt * 8);
+    p.heading = Math.atan2(ix, iz);
+    p.pos.x += ix * p.speed * dt;
+    p.pos.z += iz * p.speed * dt;
+    p.walkPhase += dt * p.speed * 1.6;
+  } else {
+    p.speed += (0 - p.speed) * Math.min(1, dt * 10);
   }
+  resolveCollisions(p.pos, 0.55);
+  p.group.position.set(p.pos.x, 0, p.pos.z);
+  p.group.rotation.y = p.heading;
 
-  // Walk-cycle swing.
-  const swing = player.moving ? Math.sin(player.walkPhase) * 0.55 : 0;
-  player.legL.rotation.x = swing;
-  player.legR.rotation.x = -swing;
-  player.armL.rotation.x = -swing * 0.7;
-  // Right arm stays forward holding the pistol.
-  player.armR.rotation.x = -0.9;
-  player.gun.visible = S.weapon === 'pistol';
+  // Walk/run cycle.
+  const swing = Math.min(1, p.speed / RUN_SPEED) * 0.65;
+  const ph = p.walkPhase;
+  p.legL.rotation.x = Math.sin(ph) * swing;
+  p.legR.rotation.x = -Math.sin(ph) * swing;
+  p.armL.rotation.x = -Math.sin(ph) * swing * 0.8;
+  p.armR.rotation.x = Math.sin(ph) * swing * 0.8;
+  if (p.punchTimer > 0) {
+    p.punchTimer -= dt;
+    p.armR.rotation.x = -1.4 * Math.max(0, p.punchTimer / 0.28);
+  }
+  // Gun stays level while walking.
+  p.gun.rotation.x = Math.sin(ph * 2) * 0.03 * Math.min(1, p.speed / WALK_SPEED);
 
-  player.group.position.copy(player.pos);
-  player.group.rotation.y = player.heading;
-  // Small bob while walking.
-  player.group.position.y = player.moving ? Math.abs(Math.sin(player.walkPhase)) * 0.06 : 0;
+  // Muzzle flash decay (or held open by the staging debug hook).
+  if (!S.debug.holdFlash) {
+    if (p.flashTimer > 0) {
+      p.flashTimer -= dt;
+      const on = p.flashTimer > 0;
+      p.flashMat.opacity = on ? 0.95 : 0;
+      p.flashLight.intensity = on ? 26 : 0;
+    } else {
+      p.flashMat.opacity = 0;
+      p.flashLight.intensity = 0;
+    }
+  }
+  S.speedKmh = p.speed * 3.6;
 }
 
-/**
- * Position the third-person camera. On foot it orbits the player; in a
- * car it sits behind the car and follows its heading.
- */
-export function updateCamera(camera, dt) {
-  const target = S.car ? S.car.group.position : player.pos;
-  const targetHead = target.y + (S.car ? 1.6 : 1.5);
-
-  if (S.car) {
-    // Chase cam: ease the yaw toward the car's heading.
-    player.camYaw = angleLerp(player.camYaw, S.car.heading + Math.PI, Math.min(1, dt * 2.2));
-  }
-
-  const dist = S.car ? 9.5 : player.camDist;
-  const height = S.car ? 3.2 : 2.6;
-  const cx = target.x + Math.sin(player.camYaw) * dist * Math.cos(player.camPitch);
-  const cz = target.z + Math.cos(player.camYaw) * dist * Math.cos(player.camPitch);
-  const cy = targetHead + height * Math.sin(player.camPitch) + (S.car ? 1.2 : 0.6);
-
-  // Camera shake on top of the orbit.
-  let sx = 0;
-  let sy = 0;
-  if (S.shake.t > 0) {
-    const m = S.shake.mag * (S.shake.t / 0.25);
-    sx = (Math.random() - 0.5) * m;
-    sy = (Math.random() - 0.5) * m;
-  }
-  camera.position.set(cx + sx, cy + sy, cz);
-  camera.lookAt(target.x + sx * 0.5, targetHead + sy * 0.5, target.z);
+// Over-shoulder camera: shift camera and look target sideways (+right) so
+// the character renders left of centre and the centre crosshair aims past
+// the right shoulder instead of at the back of the head.
+export function updateCamera(dt) {
+  const p = S.player;
+  if (!p || !S.camera) return;
+  const yaw = S.camYaw;
+  const pitch = clamp(S.camPitch, -0.15, 0.85);
+  const dist = S.camDist;
+  const backX = Math.sin(yaw) * Math.cos(pitch);
+  const backZ = Math.cos(yaw) * Math.cos(pitch);
+  const up = Math.sin(pitch);
+  const rightX = Math.cos(yaw);
+  const rightZ = -Math.sin(yaw);
+  const shoulder = 1.15; // lateral over-shoulder offset
+  const tx = p.pos.x + rightX * shoulder;
+  const tz = p.pos.z + rightZ * shoulder;
+  const ty = 1.55;
+  const cx = tx + backX * dist;
+  const cz = tz + backZ * dist;
+  const cy = ty + up * dist;
+  const cam = S.camera;
+  cam.position.x += (cx - cam.position.x) * Math.min(1, dt * 10);
+  cam.position.y += (cy - cam.position.y) * Math.min(1, dt * 10);
+  cam.position.z += (cz - cam.position.z) * Math.min(1, dt * 10);
+  cam.lookAt(tx, ty, tz);
 }
 
-/** Teleport the player (used by staging and the debug hooks). */
-export function teleportPlayer(x, z, heading = null) {
-  player.pos.set(x, 0, z);
-  if (heading !== null) {
-    player.heading = heading;
-    player.camYaw = heading + Math.PI;
-  }
-  player.group.position.copy(player.pos);
+export function aimDirection() {
+  // Where the centre crosshair points: from the camera through its look
+  // target, i.e. past the player's right shoulder.
+  const cam = S.camera;
+  const dir = new THREE.Vector3();
+  cam.getWorldDirection(dir);
+  return dir;
+}
+
+export function muzzleWorldPos(out) {
+  // World position of the gun barrel tip (flash is a child of the gun).
+  const p = S.player;
+  const tip = new THREE.Vector3(0, 0, 0.75);
+  p.gun.localToWorld(tip);
+  out.copy(tip);
+  return out;
 }

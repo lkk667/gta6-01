@@ -1,92 +1,59 @@
-// Solmar City — keyboard and mouse input.
-// Pointer lock for looking around, with a click-drag fallback for
-// browsers and headless runs where the lock is refused.
+// Solmar City — keyboard + mouse input (v3 rewrite).
+// Pointer lock with a drag-orbit fallback for browsers that refuse it.
 
 import { S } from './state.js';
 
-export const input = {
-  keys: new Set(),
-  lookDX: 0,
-  lookDY: 0,
-  mouseDown: false,
-  dragging: false,
-  locked: false,
-  clicked: false, // a fresh left click this frame
-  pressed: new Set(), // keys pressed this frame (edge-triggered)
-};
-
-let canvas = null;
-let lastX = 0;
-let lastY = 0;
-
-export function initInput(canvasEl) {
-  canvas = canvasEl;
-
+export function buildInput() {
+  const canvas = S.renderer.domElement;
   window.addEventListener('keydown', (e) => {
-    if (e.repeat) return;
-    input.keys.add(e.code);
-    input.pressed.add(e.code);
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) {
+    S.keys[e.code] = true;
+    if (e.code === 'KeyM') {
+      S.muted = !S.muted;
+      if (S.audio) S.audio.engine(0, false);
+    }
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
       e.preventDefault();
     }
   });
-  window.addEventListener('keyup', (e) => input.keys.delete(e.code));
-  window.addEventListener('blur', () => input.keys.clear());
-
-  document.addEventListener('pointerlockchange', () => {
-    input.locked = document.pointerLockElement === canvas;
+  window.addEventListener('keyup', (e) => {
+    S.keys[e.code] = false;
+  });
+  window.addEventListener('blur', () => {
+    S.keys = {};
   });
 
   canvas.addEventListener('click', () => {
     if (S.mode !== 'playing') return;
-    if (!input.locked && canvas.requestPointerLock) {
+    if (S.audio) S.audio.unlock();
+    if (!S.pointerLocked && canvas.requestPointerLock) {
       try {
-        const p = canvas.requestPointerLock();
-        if (p && p.catch) p.catch(() => {});
-      } catch (err) {
-        /* pointer lock unavailable: drag-orbit fallback below */
-      }
+        const r = canvas.requestPointerLock();
+        if (r && r.catch) r.catch(() => { /* fallback: drag orbit */ });
+      } catch (e) { /* fallback: drag orbit */ }
     }
   });
-
+  document.addEventListener('pointerlockchange', () => {
+    S.pointerLocked = document.pointerLockElement === canvas;
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (S.mode !== 'playing') return;
+    if (S.pointerLocked) {
+      S.camYaw -= e.movementX * 0.0032;
+      S.camPitch += e.movementY * 0.0022;
+      S.camPitch = Math.max(-0.15, Math.min(0.85, S.camPitch));
+    } else if (S.dragOrbit && e.buttons === 1) {
+      S.camYaw -= e.movementX * 0.005;
+      S.camPitch += e.movementY * 0.003;
+      S.camPitch = Math.max(-0.15, Math.min(0.85, S.camPitch));
+    }
+  });
   canvas.addEventListener('mousedown', (e) => {
-    input.mouseDown = true;
-    input.dragging = true;
-    lastX = e.clientX;
-    lastY = e.clientY;
-    if (e.button === 0) input.clicked = true;
+    if (e.button === 0) S.dragOrbit = true;
   });
   window.addEventListener('mouseup', () => {
-    input.mouseDown = false;
-    input.dragging = false;
+    S.dragOrbit = false;
   });
-  window.addEventListener('mousemove', (e) => {
-    if (input.locked) {
-      input.lookDX += e.movementX || 0;
-      input.lookDY += e.movementY || 0;
-    } else if (input.dragging) {
-      input.lookDX += e.clientX - lastX;
-      input.lookDY += e.clientY - lastY;
-      lastX = e.clientX;
-      lastY = e.clientY;
-    }
-  });
-  // Keep the context menu from popping up over the game.
-  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-}
-
-/** Consume this frame's edge-triggered input. Call once per frame. */
-export function endFrameInput() {
-  input.lookDX = 0;
-  input.lookDY = 0;
-  input.clicked = false;
-  input.pressed.clear();
-}
-
-export function keyDown(code) {
-  return input.keys.has(code);
-}
-
-export function keyPressed(code) {
-  return input.pressed.has(code);
+  canvas.addEventListener('wheel', (e) => {
+    S.camDist = Math.max(5, Math.min(14, S.camDist + Math.sign(e.deltaY) * 0.8));
+  }, { passive: true });
 }

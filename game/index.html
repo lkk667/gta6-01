@@ -3,109 +3,98 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solmar City — Open-World Crime Game</title>
+<title>Solmar City</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0e1420; font-family: Arial, Helvetica, sans-serif; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0e14; font-family: Arial, Helvetica, sans-serif; }
   #game { display: block; width: 100%; height: 100%; }
-
-  #hud { display: none; position: fixed; inset: 0; pointer-events: none; color: #fff; z-index: 5; }
-  .panel { background: rgba(10, 16, 24, 0.55); border-radius: 10px; padding: 8px 12px; }
-
-  #top-left { position: absolute; top: 14px; left: 14px; display: flex; flex-direction: column; gap: 8px; }
-  #stars { font-size: 26px; letter-spacing: 3px; line-height: 1; text-shadow: 0 2px 6px rgba(0,0,0,0.7); }
-  #stars .star { color: rgba(255,255,255,0.25); }
-  #stars .star.on { color: #ffd23e; }
-  #cash { font-size: 26px; font-weight: bold; color: #7affc8; text-shadow: 0 2px 6px rgba(0,0,0,0.7); }
-  #objective { font-size: 15px; max-width: 380px; line-height: 1.35; }
-
-  #top-right { position: absolute; top: 14px; right: 14px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-  #minimap { width: 180px; height: 180px; border: 2px solid rgba(255,255,255,0.6); border-radius: 8px; background: #20262c; }
-  #health-wrap { width: 180px; }
-  #health-bar { height: 12px; background: rgba(0,0,0,0.55); border-radius: 6px; overflow: hidden; }
-  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #2ecc40, #7affc8); }
-  #health-text { font-size: 13px; text-align: right; margin-top: 2px; text-shadow: 0 1px 4px rgba(0,0,0,0.8); }
-  #ammo { font-size: 22px; font-weight: bold; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
-
-  #speed { position: absolute; right: 18px; bottom: 54px; font-size: 34px; font-weight: bold; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
-
-  #toasts { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; width: 640px; }
-  .toast { background: rgba(10, 16, 24, 0.72); border-left: 4px solid #ffc832; padding: 9px 18px; border-radius: 8px; font-size: 17px; text-align: center; }
-  .toast.big { font-size: 24px; font-weight: bold; border-left-color: #7affc8; }
-
-  #crosshair { display: none; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); }
-  #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,0.9); }
-  #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
-  #crosshair::after { left: 0; top: 10px; width: 22px; height: 2px; }
-
-  #hint { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); font-size: 14px; background: rgba(10,16,24,0.6); padding: 7px 14px; border-radius: 8px; white-space: nowrap; }
-
-  .overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; text-align: center; color: #fff; }
-  #menu { background: linear-gradient(180deg, rgba(20,60,110,0.88) 0%, rgba(10,20,36,0.94) 70%); }
-  #menu h1 { font-size: 64px; letter-spacing: 6px; color: #ffd23e; text-shadow: 0 4px 0 #b8860b, 0 8px 24px rgba(0,0,0,0.6); }
-  #menu h2 { font-size: 20px; font-weight: normal; color: #bfe6ff; margin: 10px 0 26px; }
-  .menu-btn { pointer-events: auto; display: block; width: 300px; margin: 8px auto; padding: 13px 20px; font-size: 18px; font-weight: bold; color: #10202f; background: #ffd23e; border: none; border-radius: 10px; cursor: pointer; }
-  .menu-btn:hover { background: #ffe27a; }
-  .menu-btn.secondary { background: rgba(255,255,255,0.16); color: #fff; border: 1px solid rgba(255,255,255,0.5); }
-  .menu-btn.small { width: auto; display: inline-block; margin: 4px; padding: 9px 14px; font-size: 14px; }
-  #howto { display: none; margin: 14px auto; padding: 14px 20px; background: rgba(0,0,0,0.45); border-radius: 10px; font-size: 15px; line-height: 1.8; text-align: left; max-width: 520px; }
-  #replay { display: none; flex-wrap: wrap; justify-content: center; max-width: 640px; margin-top: 10px; }
-  #menu .foot { margin-top: 22px; font-size: 13px; color: rgba(255,255,255,0.65); }
-
-  #busted { display: none; background: rgba(80, 0, 10, 0.82); }
-  #busted-title { font-size: 72px; letter-spacing: 8px; color: #ff4d4d; text-shadow: 0 4px 24px rgba(0,0,0,0.8); }
-  #busted-text { font-size: 18px; margin: 16px 0 26px; max-width: 480px; line-height: 1.5; }
+  .panel { background: rgba(10, 14, 20, 0.55); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 8px; padding: 6px 12px; backdrop-filter: blur(2px); }
+  #top-left { position: fixed; top: 14px; left: 14px; z-index: 10; color: #fff; }
+  #stars { font-size: 26px; letter-spacing: 2px; line-height: 1; }
+  #stars .star.dim { color: rgba(255, 255, 255, 0.55); text-shadow: 0 0 2px #000, 0 1px 0 #000, 1px 0 0 #000, -1px 0 0 #000, 0 -1px 0 #000; }
+  #stars .star.lit { color: #ffd94a; text-shadow: 0 0 10px rgba(255, 200, 40, 0.9), 0 0 3px rgba(255, 200, 40, 0.8), 0 1px 2px #000; }
+  #cash { font-size: 20px; font-weight: bold; color: #7ad87a; margin-top: 2px; }
+  #objective { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 10; color: #fff; font-size: 15px; max-width: 46%; text-align: center; }
+  #health { position: fixed; left: 14px; bottom: 14px; z-index: 10; color: #fff; display: flex; align-items: center; gap: 8px; }
+  #health svg { flex: none; }
+  #health-bar-wrap { width: 150px; height: 14px; background: rgba(0, 0, 0, 0.5); border-radius: 7px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.25); }
+  #health-bar { height: 100%; width: 100%; background: linear-gradient(90deg, #37c24a, #7ad87a); }
+  #health-text { font-size: 18px; font-weight: bold; min-width: 34px; }
+  #ammo { position: fixed; right: 14px; bottom: 64px; z-index: 10; color: #fff; display: flex; align-items: center; gap: 8px; font-size: 24px; font-weight: bold; }
+  #ammo svg { flex: none; }
+  #speed { position: fixed; right: 14px; bottom: 14px; z-index: 10; color: #fff; font-size: 30px; font-weight: bold; text-shadow: 0 2px 4px #000; }
+  #minimap { position: fixed; right: 14px; top: 14px; z-index: 10; border: 2px solid rgba(255, 255, 255, 0.35); border-radius: 6px; background: #101418; }
+  #toasts { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+  .toast { background: rgba(10, 14, 20, 0.72); border: 1px solid rgba(255, 217, 74, 0.5); border-radius: 8px; padding: 8px 18px; color: #fff; text-align: center; max-width: 560px; }
+  .toast b { font-size: 17px; display: block; }
+  .toast span { font-size: 13px; color: #d8d8d8; }
+  #crosshair { position: fixed; left: 50%; top: 50%; z-index: 9; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: none; pointer-events: none; color: #fff; font-size: 22px; line-height: 22px; text-align: center; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
+  #hint { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 10; color: rgba(255, 255, 255, 0.85); font-size: 12px; text-shadow: 0 1px 2px #000; text-align: center; }
+  #menu { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: linear-gradient(160deg, rgba(20, 40, 80, 0.88), rgba(10, 20, 40, 0.92)); color: #fff; text-align: center; }
+  #menu h1 { font-size: 64px; letter-spacing: 4px; color: #ffd94a; text-shadow: 0 4px 18px rgba(255, 200, 40, 0.5); }
+  #menu h2 { font-size: 20px; font-weight: normal; color: #bcd8ff; }
+  #menu .missions { font-size: 14px; color: #d8d8d8; line-height: 1.7; }
+  #menu button { font-size: 18px; padding: 12px 34px; border-radius: 8px; border: none; cursor: pointer; background: #ffd94a; color: #201808; font-weight: bold; }
+  #menu button.secondary { background: rgba(255, 255, 255, 0.16); color: #fff; border: 1px solid rgba(255, 255, 255, 0.4); }
+  #menu .controls { font-size: 13px; color: #b8c8d8; line-height: 1.8; }
+  #menu .fine { font-size: 12px; color: rgba(255, 255, 255, 0.55); max-width: 520px; }
+  #busted { position: fixed; inset: 0; z-index: 20; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: rgba(10, 10, 30, 0.82); color: #fff; text-align: center; }
+  #busted h1 { font-size: 56px; letter-spacing: 6px; color: #ff5a5a; }
+  #busted button { font-size: 18px; padding: 12px 34px; border-radius: 8px; border: none; cursor: pointer; background: #ffd94a; color: #201808; font-weight: bold; }
 </style>
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
-</script>
 </head>
 <body>
 <canvas id="game"></canvas>
 
-<div id="hud">
-  <div id="top-left">
-    <div id="stars"></div>
-    <div id="cash">$0</div>
-    <div id="objective" class="panel">Welcome to Solmar City</div>
-  </div>
-  <div id="top-right">
-    <canvas id="minimap" width="180" height="180"></canvas>
-    <div id="health-wrap">
-      <div id="health-bar"><div id="health-fill"></div></div>
-      <div id="health-text">100</div>
-    </div>
-    <div id="ammo">12 / 60</div>
-  </div>
-  <div id="speed">0 km/h</div>
-  <div id="toasts"></div>
-  <div id="crosshair"></div>
-  <div id="hint"></div>
+<div id="top-left" class="panel">
+  <div id="stars"></div>
+  <div id="cash">$0</div>
 </div>
+<div id="objective" class="panel"></div>
+<canvas id="minimap" width="150" height="150"></canvas>
 
-<div id="menu" class="overlay">
+<div id="health" class="panel">
+  <svg width="20" height="18" viewBox="0 0 20 18" aria-label="health"><path d="M10 17 C4 12 0 8.5 0 5 C0 2 2 0 4.5 0 C6.5 0 8.5 1.2 10 3 C11.5 1.2 13.5 0 15.5 0 C18 0 20 2 20 5 C20 8.5 16 12 10 17 Z" fill="#ff5a6a"/></svg>
+  <div id="health-bar-wrap"><div id="health-bar"></div></div>
+  <span id="health-text">100</span>
+</div>
+<div id="ammo" class="panel">
+  <svg width="12" height="26" viewBox="0 0 12 26" aria-label="ammo"><path d="M6 0 C9 4 10 7 10 11 L10 20 L2 20 L2 11 C2 7 3 4 6 0 Z" fill="#e8c84a"/><rect x="2" y="20" width="8" height="6" fill="#b89a2a"/></svg>
+  <span id="ammo-count">12 / 60</span>
+</div>
+<div id="speed">0 km/h</div>
+<div id="toasts"></div>
+<div id="crosshair">+</div>
+<div id="hint">WASD move &middot; Shift run &middot; click to lock mouse &middot; move mouse to look &middot; left-click shoot &middot; F punch &middot; R reload &middot; E enter / exit car &middot; M sound</div>
+
+<div id="menu">
   <h1>SOLMAR CITY</h1>
-  <h2>A sun-soaked open-world crime game — steal, drive, run, survive.</h2>
-  <button id="btn-start" class="menu-btn">Start New Game</button>
-  <button id="btn-continue" class="menu-btn secondary" style="display:none">Continue</button>
-  <button id="btn-how" class="menu-btn secondary">How to Play</button>
-  <div id="howto">
-    <b>On foot:</b> WASD move · Shift run · click to lock mouse · move mouse to look · left-click shoot · F punch · R reload · 1 pistol / 2 fists<br>
-    <b>Driving:</b> WASD drive · Space handbrake · E get in / out of a car<br>
-    <b>Stealing a car</b> puts you on 2 stars — lose the cops to cool off.<br>
-    <b>Follow the gold beacon</b> to run the story missions. M toggles sound.
+  <h2>A sun-soaked coastal city. Steal cars, outrun the Solmar PD, run five story missions.</h2>
+  <div class="missions">
+    1 &middot; Sunrise Delivery &nbsp;&mdash;&nbsp; 2 &middot; Borrowed Wheels &nbsp;&mdash;&nbsp; 3 &middot; Cool Down<br>
+    4 &middot; Five Drops &nbsp;&mdash;&nbsp; 5 &middot; Harbor Run
   </div>
-  <div id="replay"></div>
-  <button id="btn-mute" class="menu-btn secondary">Mute (M)</button>
-  <div class="foot">Solmar City is an original game. No affiliation with any commercial game series.</div>
+  <div>
+    <button id="btn-new">New Game</button>
+    <button id="btn-continue" class="secondary" style="display:none">Continue</button>
+    <button id="btn-replay" class="secondary" style="display:none">Replay Missions</button>
+  </div>
+  <div class="controls">
+    On foot: WASD move &middot; Shift run &middot; click to lock mouse &middot; move mouse to look &middot; left-click shoot &middot; F punch &middot; R reload &middot; 1 pistol / 2 fists<br>
+    Driving: WASD drive &middot; Space handbrake &middot; E get in / out of a car &middot; M toggles sound
+  </div>
+  <div class="fine">Solmar City is an original game. No affiliation with any commercial game series.</div>
 </div>
 
-<div id="busted" class="overlay">
-  <div id="busted-title">BUSTED</div>
-  <div id="busted-text"></div>
-  <button id="btn-busted" class="menu-btn">Back on the Streets</button>
+<div id="busted">
+  <h1>BUSTED</h1>
+  <p>The Solmar PD caught up with you. You walk out of Solmar General with a clean slate.</p>
+  <button id="btn-busted">Walk out of Solmar General</button>
 </div>
 
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
 <script type="module" src="./js/main.js"></script>
 </body>
 </html>
