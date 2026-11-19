@@ -1,4 +1,4 @@
-// Solmar City — on-foot character and third-person camera (v4 polish).
+// Solmar City — on-foot character and third-person camera (v4 polish, re-implemented).
 // Over-shoulder framing: the camera and its look target are both shifted
 // sideways so the character sits left of centre and the crosshair clears
 // the head, aiming past the right shoulder into open view.
@@ -9,6 +9,35 @@ import { resolveCollisions, attachBlob } from './city.js';
 
 const WALK_SPEED = 6;
 const RUN_SPEED = 10;
+
+// 4-point star texture for the muzzle flash: 8 vertices alternating
+// outer/inner radius, hot white core, warm glow edge.
+function makeStarTex() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext('2d');
+  g.translate(64, 64);
+  g.fillStyle = '#fff2b8';
+  g.shadowColor = '#ff9a2a';
+  g.shadowBlur = 16;
+  g.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const r = i % 2 === 0 ? 60 : 12;
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r;
+    if (i === 0) g.moveTo(x, y);
+    else g.lineTo(x, y);
+  }
+  g.closePath();
+  g.fill();
+  g.beginPath();
+  g.arc(0, 0, 12, 0, Math.PI * 2);
+  g.fillStyle = '#ffffff';
+  g.fill();
+  return new THREE.CanvasTexture(c);
+}
 
 export function buildPlayer() {
   const group = new THREE.Group();
@@ -77,30 +106,7 @@ export function buildPlayer() {
   // to the gun barrel tip — never a yellow ball, never a ground puddle.
   // The light is small and short-range on purpose: it lights the gun, not
   // the whole street.
-  const starTex = (() => {
-    const c = document.createElement('canvas');
-    c.width = 128;
-    c.height = 128;
-    const g = c.getContext('2d');
-    g.translate(64, 64);
-    g.fillStyle = '#fff2b8';
-    g.shadowColor = '#ff9a2a';
-    g.shadowBlur = 16;
-    g.beginPath();
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      const r = i % 2 === 0 ? 60 : 12;
-      const x = Math.cos(a) * r, y = Math.sin(a) * r;
-      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
-    }
-    g.closePath();
-    g.fill();
-    g.beginPath();
-    g.arc(0, 0, 12, 0, Math.PI * 2);
-    g.fillStyle = '#ffffff';
-    g.fill();
-    return new THREE.CanvasTexture(c);
-  })();
+  const starTex = makeStarTex();
   const flashMat = new THREE.MeshBasicMaterial({ map: starTex, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
   const flashA = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7), flashMat);
   flashA.position.z = 0.72;

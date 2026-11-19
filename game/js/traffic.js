@@ -1,7 +1,7 @@
-// Solmar City — traffic cars and pedestrians (v4 polish).
-// 14 cars loop the road grid; 26 pedestrians walk the sidewalks, flee
-// gunfire, and — new in v3 — dodge cars coming at them instead of standing
-// in the road while a car passes through them.
+// Solmar City — traffic cars and pedestrians (v4 polish, re-implemented).
+// 28 cars loop the road grid; 40 pedestrians walk the sidewalks, flee
+// gunfire, and dodge cars coming at them instead of standing in the road
+// while a car passes through them.
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, WORLD, dist2, clamp } from './state.js';
@@ -12,23 +12,26 @@ const PED_SHIRTS = [0xe84a4a, 0x4a8ae8, 0x4ad87a, 0xe8d84a, 0xd87ab8, 0x7ad8d8, 
 const PED_SKINS = [0xe8b88a, 0xc88a5a, 0x8a5a34, 0xf2c8a0];
 const PED_PANTS = [0x2c2f36, 0x3a4a6a, 0x6a3a3a, 0x4a5a3a, 0x8a7a5a];
 
+// Pick a random entry from a palette array.
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
 function buildPedestrian() {
   const g = new THREE.Group();
-  const shirt = new THREE.MeshLambertMaterial({ color: PED_SHIRTS[Math.floor(Math.random() * PED_SHIRTS.length)] });
-  const skin = new THREE.MeshLambertMaterial({ color: PED_SKINS[Math.floor(Math.random() * PED_SKINS.length)] });
-  const pants = new THREE.MeshLambertMaterial({ color: PED_PANTS[Math.floor(Math.random() * PED_PANTS.length)] });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.62, 0.3), shirt);
+  const shirtMat = new THREE.MeshLambertMaterial({ color: pick(PED_SHIRTS) });
+  const skinMat = new THREE.MeshLambertMaterial({ color: pick(PED_SKINS) });
+  const pantsMat = new THREE.MeshLambertMaterial({ color: pick(PED_PANTS) });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.62, 0.3), shirtMat);
   torso.position.y = 1.05;
   torso.castShadow = true;
   g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 10, 8), skin);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 10, 8), skinMat);
   head.position.y = 1.6;
   head.castShadow = true;
   g.add(head);
   // Varied looks: a cap, hair, or bare head.
   const roll = Math.random();
   if (roll < 0.35) {
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.25, 0.09, 10), new THREE.MeshLambertMaterial({ color: PED_SHIRTS[Math.floor(Math.random() * PED_SHIRTS.length)] }));
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.25, 0.09, 10), new THREE.MeshLambertMaterial({ color: pick(PED_SHIRTS) }));
     cap.position.y = 1.79;
     g.add(cap);
   } else if (roll < 0.65) {
@@ -39,7 +42,7 @@ function buildPedestrian() {
   // Legs pivot at the hip, arms at the shoulder, so the walk swing reads.
   const legGeo = new THREE.BoxGeometry(0.19, 0.68, 0.2);
   legGeo.translate(0, -0.34, 0);
-  const legL = new THREE.Mesh(legGeo, pants);
+  const legL = new THREE.Mesh(legGeo, pantsMat);
   legL.position.set(-0.14, 0.68, 0);
   g.add(legL);
   const legR = legL.clone();
@@ -47,7 +50,7 @@ function buildPedestrian() {
   g.add(legR);
   const armGeo = new THREE.BoxGeometry(0.16, 0.62, 0.18);
   armGeo.translate(0, -0.31, 0);
-  const armL = new THREE.Mesh(armGeo, shirt);
+  const armL = new THREE.Mesh(armGeo, shirtMat);
   armL.position.set(-0.37, 1.32, 0);
   g.add(armL);
   const armR = armL.clone();
@@ -149,9 +152,9 @@ export function updateTraffic(dt) {
   for (const c of S.trafficCars) {
     // Brake for a pedestrian directly ahead in the road.
     let target = c.cruise;
+    const fx = Math.sin(c.heading);
+    const fz = Math.cos(c.heading);
     for (const ped of S.peds) {
-      const fx = Math.sin(c.heading);
-      const fz = Math.cos(c.heading);
       const dx = ped.mesh.position.x - c.mesh.position.x;
       const dz = ped.mesh.position.z - c.mesh.position.z;
       const ahead = dx * fx + dz * fz;
@@ -160,8 +163,6 @@ export function updateTraffic(dt) {
     }
     // Obey traffic lights: stop at red, ease off at yellow.
     if (S.trafficLights) {
-      const fx = Math.sin(c.heading);
-      const fz = Math.cos(c.heading);
       const axis = Math.abs(fx) > 0.7 ? 'ew' : 'ns';
       for (const L of S.trafficLights) {
         const dx = L.x - c.mesh.position.x;

@@ -1,4 +1,4 @@
-// Solmar City — localStorage autosave (v4 polish).
+// Solmar City — localStorage autosave (v4 polish, re-implemented).
 
 import { S } from './state.js';
 

@@ -9,6 +9,7 @@ An original open-world crime game built for the [Make GTA 6 bounty](https://make
 ## The game
 
 - **The city** — a road-grid city of pastel towers, parks, car parks, a beach and ocean, with landmarks of its own: Solmar Tower, Cafe Luna (neon storefront), the Hideout garage, Solmar Harbor and Solmar General hospital.
+- **Golden-hour atmosphere** — a low warm sun with real long shadows, a gradient dusk sky, lit windows, traffic lights, storefronts and rooftop props; taxis, trucks and two-tone police cruisers with pulsing ground reflections.
 - **On foot and by car** — third-person over-shoulder mouse-orbit camera, walk/run, arcade driving with a handbrake, enter/exit any parked car.
 - **Wanted level** — heat from 0 to 100 becomes 0 to 5 stars. Stealing a car puts you straight on 2 stars; black-and-white cruisers chase, ram and flash big glowing light bars, and getting cornered on foot means BUSTED. Lie low and the heat cools off.
 - **Five story missions** — a delivery, a car-theft getaway, losing the cops, five drops to collect, and a harbor finale, with cash rewards, a bright gold beacon marking the target, free roam and replay after the finale.

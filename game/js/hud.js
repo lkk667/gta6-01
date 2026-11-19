@@ -1,5 +1,5 @@
 // Solmar City — HUD: stars, cash, health, ammo, objective, speed, toasts,
-// live minimap (v4 polish). Stars and cash sit on a translucent panel now;
+// live minimap (v4 polish, re-implemented). Stars and cash sit on a translucent panel now;
 // unlit stars are bright-outlined, lit stars glow gold; health and ammo get
 // icons and bigger numbers; the speedometer hides while on foot; minimap
 // police dots are big and flash red/blue.
@@ -90,7 +90,8 @@ function drawMinimap(stars) {
   for (const rx of WORLD.roads) {
     for (const rz of WORLD.roads) {
       const [bx, by] = toMap(rx + 5, rz + 5);
-      g.fillStyle = blockCols[Math.abs((rx + rz) / 40) % blockCols.length];
+      const colIdx = Math.abs((rx + rz) / 40) % blockCols.length;
+      g.fillStyle = blockCols[colIdx];
       g.fillRect(bx, by, 30 * scale, 30 * scale);
     }
   }

@@ -1,4 +1,4 @@
-// Solmar City — keyboard + mouse input (v3 rewrite).
+// Solmar City — keyboard + mouse input (v4 polish, re-implemented).
 // Pointer lock with a drag-orbit fallback for browsers that refuse it.
 
 import { S } from './state.js';
@@ -54,6 +54,7 @@ export function buildInput() {
     S.dragOrbit = false;
   });
   canvas.addEventListener('wheel', (e) => {
-    S.camDist = Math.max(5, Math.min(14, S.camDist + Math.sign(e.deltaY) * 0.8));
+    const next = S.camDist + Math.sign(e.deltaY) * 0.8;
+    S.camDist = Math.max(5, Math.min(14, next));
   }, { passive: true });
 }

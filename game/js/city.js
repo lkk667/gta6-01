@@ -1,4 +1,4 @@
-// Solmar City — the city (v4 polish).
+// Solmar City — the city (v4 polish, re-implemented).
 // 9x9 road grid in a 380x380 m coastal city: pastel towers, parks, beach and
 // ocean, landmarks, palms, streetlights, clouds, building collision, and the
 // ground/contact-shadow helpers every other system uses.
@@ -25,32 +25,35 @@ function canvasTex(w, h, draw, repeatX, repeatY) {
   return t;
 }
 
+// Dusk sky: a big inverted sphere painted with a vertical gradient — deep
+// violet overhead fading through magenta and orange to a warm horizon —
+// plus a low sun glow on the western side. The dome ignores fog.
 function skyDome() {
-  // Dusk gradient sky: deep violet overhead, orange-pink band, warm horizon.
-  const c = document.createElement('canvas');
-  c.width = 1024;
-  c.height = 512;
-  const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0, '#1e1440');
-  grad.addColorStop(0.35, '#6a2a55');
-  grad.addColorStop(0.58, '#e85a3a');
-  grad.addColorStop(0.74, '#ff9a55');
-  grad.addColorStop(0.86, '#ffc27a');
-  grad.addColorStop(1, '#ffd9a0');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 1024, 512);
-  // Low sun glow on the western horizon.
-  const sun = g.createRadialGradient(260, 430, 4, 260, 430, 130);
-  sun.addColorStop(0, 'rgba(255,240,200,0.95)');
-  sun.addColorStop(0.35, 'rgba(255,190,110,0.55)');
-  sun.addColorStop(1, 'rgba(255,150,80,0)');
-  g.fillStyle = sun;
-  g.fillRect(0, 0, 1024, 512);
-  const t = new THREE.CanvasTexture(c);
+  const cv = document.createElement('canvas');
+  cv.width = 1024;
+  cv.height = 512;
+  const ctx = cv.getContext('2d');
+  const sky = ctx.createLinearGradient(0, 0, 0, 512);
+  const stops = [
+    [0, '#1e1440'],
+    [0.35, '#6a2a55'],
+    [0.58, '#e85a3a'],
+    [0.74, '#ff9a55'],
+    [0.86, '#ffc27a'],
+    [1, '#ffd9a0'],
+  ];
+  for (const [pos, col] of stops) sky.addColorStop(pos, col);
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, 1024, 512);
+  const glow = ctx.createRadialGradient(260, 430, 4, 260, 430, 130);
+  glow.addColorStop(0, 'rgba(255,240,200,0.95)');
+  glow.addColorStop(0.35, 'rgba(255,190,110,0.55)');
+  glow.addColorStop(1, 'rgba(255,150,80,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, 1024, 512);
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(700, 24, 14),
-    new THREE.MeshBasicMaterial({ map: t, side: THREE.BackSide, fog: false })
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), side: THREE.BackSide, fog: false })
   );
   dome.renderOrder = -10;
   S.scene.add(dome);
@@ -320,25 +323,27 @@ function buildGround() {
   S.scene.add(ocean);
 }
 
-// Shared shop-sign textures (one canvas each, reused by every storefront).
+// Shared shop-sign textures: one small dark plate with a glowing name each,
+// drawn once per name and reused by every storefront in the city.
 const SHOP_NAMES = ['TACOS', 'PIZZA', 'BARBER', 'LAUNDRY', 'BAKERY', 'PHONES', 'DONUTS', 'FLOWERS'];
-let shopSignTexs = null;
+const shopSignCache = new Map();
 function shopSignTex(name) {
-  if (!shopSignTexs) {
-    shopSignTexs = SHOP_NAMES.map((n) => canvasTex(256, 64, (g, w, h) => {
-      g.fillStyle = '#1c1410';
-      g.fillRect(0, 0, w, h);
-      g.fillStyle = '#ffd27a';
-      g.font = 'bold 34px Arial, sans-serif';
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      g.shadowColor = '#ff9a3a';
-      g.shadowBlur = 12;
-      g.fillText(n, w / 2, h / 2 + 1);
-      g.shadowBlur = 0;
-    }));
-  }
-  return shopSignTexs[SHOP_NAMES.indexOf(name) % SHOP_NAMES.length];
+  let tex = shopSignCache.get(name);
+  if (tex) return tex;
+  tex = canvasTex(256, 64, (g, w, h) => {
+    g.fillStyle = '#1c1410';
+    g.fillRect(0, 0, w, h);
+    g.fillStyle = '#ffd27a';
+    g.font = 'bold 34px Arial, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.shadowColor = '#ff9a3a';
+    g.shadowBlur = 12;
+    g.fillText(name, w / 2, h / 2 + 1);
+    g.shadowBlur = 0;
+  });
+  shopSignCache.set(name, tex);
+  return tex;
 }
 
 function buildTower(x, z, w, d, h, color) {
@@ -347,32 +352,31 @@ function buildTower(x, z, w, d, h, color) {
   const m = box(w, h, d, mat, x, h / 2, z);
   m.castShadow = true;
   m.receiveShadow = true;
-  // Varied roofline: a setback upper floor on some towers.
+  // Varied roofline: a setback upper floor on about a third of towers.
   if (rng() < 0.35) {
-    const up = box(w * 0.55, 3 + rng() * 4, d * 0.55, lambert(color), x, h + 1.5 + rng() * 2, z);
-    up.castShadow = true;
+    const upper = box(w * 0.55, 3 + rng() * 4, d * 0.55, lambert(color), x, h + 1.5 + rng() * 2, z);
+    upper.castShadow = true;
   } else {
     // Rooftop cap so towers read as buildings, not plain boxes.
     const cap = box(w * 0.7, 1.2, d * 0.7, lambert(0x5a5a62), x, h + 0.6, z);
     cap.castShadow = true;
   }
-  // Rooftop props: water tank, antenna, AC unit.
-  const roll = rng();
-  if (roll < 0.35) {
+  // Rooftop props: water tank, antenna with a red tip, or AC unit.
+  const prop = rng();
+  if (prop < 0.35) {
     const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 2.4, 8), lambert(0x7a5a3a));
     tank.position.set(x + w * 0.2, h + 1.2, z - d * 0.15);
     tank.castShadow = true;
     S.scene.add(tank);
-    const legs = box(0.3, 1, 0.3, lambert(0x4a3a2a), x + w * 0.2, h + 0.5, z - d * 0.15);
-    void legs;
-  } else if (roll < 0.6) {
-    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 7, 5), lambert(0x2c2f36));
-    ant.position.set(x - w * 0.2, h + 3.5, z + d * 0.2);
-    S.scene.add(ant);
+    box(0.3, 1, 0.3, lambert(0x4a3a2a), x + w * 0.2, h + 0.5, z - d * 0.15);
+  } else if (prop < 0.6) {
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 7, 5), lambert(0x2c2f36));
+    mast.position.set(x - w * 0.2, h + 3.5, z + d * 0.2);
+    S.scene.add(mast);
     const tip = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), new THREE.MeshBasicMaterial({ color: 0xff4a4a }));
     tip.position.set(x - w * 0.2, h + 7, z + d * 0.2);
     S.scene.add(tip);
-  } else if (roll < 0.85) {
+  } else if (prop < 0.85) {
     const ac = box(2.2, 1, 1.6, lambert(0x9aa0a8), x + w * 0.15, h + 0.5, z + d * 0.1);
     ac.castShadow = true;
   }
@@ -380,15 +384,14 @@ function buildTower(x, z, w, d, h, color) {
   // shop window, a striped awning and a small glowing name sign, so the
   // street level is shops instead of blank walls.
   if (Math.abs(x) <= 100 && Math.abs(z) <= 100 && rng() < 0.55) {
-    const fz = z + d / 2;
+    const face = z + d / 2;
     const frame = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 3), new THREE.MeshLambertMaterial({ color: 0x2c241c }));
-    frame.position.set(x, 1.7, fz + 0.05);
+    frame.position.set(x, 1.7, face + 0.05);
     S.scene.add(frame);
-    const win = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 2.5), new THREE.MeshBasicMaterial({ color: 0xffc27a }));
-    win.position.set(x, 1.7, fz + 0.1);
-    S.scene.add(win);
-    const mull = box(0.12, 2.5, 0.06, lambert(0x2c241c), x, 1.7, fz + 0.14);
-    void mull;
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 2.5), new THREE.MeshBasicMaterial({ color: 0xffc27a }));
+    glass.position.set(x, 1.7, face + 0.1);
+    S.scene.add(glass);
+    box(0.12, 2.5, 0.06, lambert(0x2c241c), x, 1.7, face + 0.14);
     const awnTex = canvasTex(128, 32, (g, aw, ah) => {
       for (let i = 0; i < 6; i++) {
         g.fillStyle = i % 2 ? '#f2e8d8' : '#3a7ad8';
@@ -396,15 +399,15 @@ function buildTower(x, z, w, d, h, color) {
       }
     });
     const awn = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.6), new THREE.MeshLambertMaterial({ map: awnTex }));
-    awn.position.set(x, 3.6, fz + 0.9);
+    awn.position.set(x, 3.6, face + 0.9);
     awn.rotation.x = -0.4;
     S.scene.add(awn);
-    const name = SHOP_NAMES[Math.floor(rng() * SHOP_NAMES.length)];
+    const shop = SHOP_NAMES[Math.floor(rng() * SHOP_NAMES.length)];
     const sign = new THREE.Mesh(
       new THREE.PlaneGeometry(5.2, 1.3),
-      new THREE.MeshBasicMaterial({ map: shopSignTex(name) })
+      new THREE.MeshBasicMaterial({ map: shopSignTex(shop) })
     );
-    sign.position.set(x, 4.9, fz + 0.12);
+    sign.position.set(x, 4.9, face + 0.12);
     S.scene.add(sign);
   }
   S.colliders.push({ x, z, r: Math.max(w, d) * 0.72 });
@@ -463,33 +466,32 @@ function buildPark() {
 function makePalm(x, z) {
   // Trunk leans a little; fronds are long drooping tapered blades in two
   // greens (not cones), with a coconut cluster at the crown.
-  const lean = (rng() - 0.5) * 0.16;
+  const tilt = (rng() - 0.5) * 0.16;
   const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(0.2, 0.34, 5.5, 6),
     lambert(0x8a6a42)
   );
   trunk.position.set(x, 2.75, z);
-  trunk.rotation.z = lean;
+  trunk.rotation.z = tilt;
   trunk.castShadow = true;
   S.scene.add(trunk);
-  const topX = x - Math.sin(lean) * 5.5;
-  const topZ = z;
-  const greens = [0x3f9a3a, 0x55b04a];
-  const frondGeo = new THREE.BoxGeometry(0.34, 0.05, 3.2);
-  frondGeo.translate(0, 0, 1.6); // pivot at the crown, tip out
+  const crownX = x - Math.sin(tilt) * 5.5;
+  const leafGreens = [0x3f9a3a, 0x55b04a];
+  const bladeGeo = new THREE.BoxGeometry(0.34, 0.05, 3.2);
+  bladeGeo.translate(0, 0, 1.6); // pivot at the crown, tip out
   for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 + rng() * 0.3;
-    const frond = new THREE.Mesh(frondGeo, new THREE.MeshLambertMaterial({ color: greens[i % 2] }));
-    frond.position.set(topX, 5.6, topZ);
-    frond.rotation.y = -a;
-    frond.rotation.x = 0.75 + rng() * 0.3; // droop downward, short reach
-    frond.castShadow = true;
-    S.scene.add(frond);
+    const ang = (i / 8) * Math.PI * 2 + rng() * 0.3;
+    const blade = new THREE.Mesh(bladeGeo, new THREE.MeshLambertMaterial({ color: leafGreens[i % 2] }));
+    blade.position.set(crownX, 5.6, z);
+    blade.rotation.y = -ang;
+    blade.rotation.x = 0.75 + rng() * 0.3; // droop downward, short reach
+    blade.castShadow = true;
+    S.scene.add(blade);
   }
-  const nutMat = lambert(0x6a4a22);
+  const nutSkin = lambert(0x6a4a22);
   for (let i = 0; i < 3; i++) {
-    const nut = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), nutMat);
-    nut.position.set(topX + (rng() - 0.5) * 0.7, 5.35, topZ + (rng() - 0.5) * 0.7);
+    const nut = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), nutSkin);
+    nut.position.set(crownX + (rng() - 0.5) * 0.7, 5.35, z + (rng() - 0.5) * 0.7);
     S.scene.add(nut);
   }
   placeBlob(x, z, 3.4, 0.025);
@@ -509,30 +511,32 @@ function makeStreetlight(x, z) {
   );
   lamp.position.set(x + 1.6, 5.85, z);
   S.scene.add(lamp);
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTex('rgba(255,210,122,1)'), transparent: true, depthWrite: false, opacity: 0.85,
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTex(), color: 0xffd27a, transparent: true, depthWrite: false, opacity: 0.85,
   }));
-  glow.scale.set(3.2, 3.2, 1);
-  glow.position.set(x + 1.6, 5.85, z);
-  S.scene.add(glow);
+  halo.scale.set(3.2, 3.2, 1);
+  halo.position.set(x + 1.6, 5.85, z);
+  S.scene.add(halo);
 }
 
-// One shared radial glow texture (lamps, headlights, light bars).
-let _glowTex = null;
-function glowTex(rgba) {
-  if (_glowTex) return _glowTex;
+// One shared radial glow texture (lamps, headlights, light bars): a soft
+// white-hot centre fading to transparent. Callers tint it with the
+// sprite material's color instead of baking a colour into the texture.
+let sharedGlow = null;
+function glowTex() {
+  if (sharedGlow) return sharedGlow;
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 64;
   const g = c.getContext('2d');
   const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);
-  grad.addColorStop(0, rgba);
-  grad.addColorStop(0.5, rgba.replace('1)', '0.45)'));
-  grad.addColorStop(1, rgba.replace('1)', '0)'));
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.45)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 64);
-  _glowTex = new THREE.CanvasTexture(c);
-  return _glowTex;
+  sharedGlow = new THREE.CanvasTexture(c);
+  return sharedGlow;
 }
 
 function buildStreetlights() {
@@ -643,7 +647,8 @@ function buildSolmarTower() {
   // tower hid it completely from road z=-80).
   const tex = windowTex('#c8d8e8', '#ffe9a8');
   tex.repeat.set(1, 3);
-  const m = box(26, 130, 26, new THREE.MeshLambertMaterial({ map: tex }), cx, 65, cz);
+  const towerMat = new THREE.MeshLambertMaterial({ map: tex });
+  const m = box(26, 130, 26, towerMat, cx, 65, cz);
   m.castShadow = true;
   m.receiveShadow = true;
   void m;
@@ -721,29 +726,33 @@ function buildHarbor() {
 // EW is the opposite. One source of truth for the heads and the cars.
 export function trafficLightState(axis) {
   const t = ((S.time % 16) + 16) % 16;
-  if (axis === 'ns') return t < 7 ? 'green' : t < 8 ? 'yellow' : 'red';
-  return t < 8 ? 'red' : t < 15 ? 'green' : 'yellow';
+  // North-south: green for the first 7 s, yellow for 1 s, red after that.
+  // East-west runs the opposite phase.
+  const ns = t < 7 ? 'green' : t < 8 ? 'yellow' : 'red';
+  if (axis === 'ns') return ns;
+  if (t < 8) return 'red';
+  return t < 15 ? 'green' : 'yellow';
 }
 
 export function updateTrafficLights() {
   if (!S.trafficLights) return;
+  const st = trafficLightState('ns');
+  const lit = { red: 0xff2a2a, yellow: 0xffd24a, green: 0x2aff5a };
+  const dim = { red: 0x331111, yellow: 0x332a10, green: 0x14301c };
   for (const L of S.trafficLights) {
-    const st = trafficLightState('ns');
-    L.red.material.color.setHex(st === 'red' ? 0xff2a2a : 0x331111);
-    L.yellow.material.color.setHex(st === 'yellow' ? 0xffd24a : 0x332a10);
-    L.green.material.color.setHex(st === 'green' ? 0x2aff5a : 0x14301c);
+    L.red.material.color.setHex(st === 'red' ? lit.red : dim.red);
+    L.yellow.material.color.setHex(st === 'yellow' ? lit.yellow : dim.yellow);
+    L.green.material.color.setHex(st === 'green' ? lit.green : dim.green);
   }
 }
 
 function buildTrafficLights() {
   S.trafficLights = [];
   // One signal per other 80 m intersection (checkerboard) to keep the count sane.
-  let n = 0;
   for (const rx of WORLD.roads) {
     for (const rz of WORLD.roads) {
       if (rx % 80 !== 0 || rz % 80 !== 0) continue;
       if (((rx + rz) / 80) % 2 !== 0) continue;
-      n++;
       const x = rx + 6.2, z = rz + 6.2;
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 5.4, 6), lambert(0x2c2f36));
       pole.position.set(x, 2.7, z);
@@ -751,22 +760,21 @@ function buildTrafficLights() {
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.5, 0.55), lambert(0x1c1e22));
       head.position.set(x, 5.6, z);
       S.scene.add(head);
-      const mkLens = (color, y, dz) => {
-        const m = new THREE.Mesh(
-          new THREE.SphereGeometry(0.19, 8, 6),
-          new THREE.MeshBasicMaterial({ color })
-        );
-        m.position.set(x, y, z + dz);
-        S.scene.add(m);
-        return m;
+      // One lens on each face; the back lens shares the front lens's
+      // material so both faces always show the same colour.
+      const lens = (offHex, y) => {
+        const mat = new THREE.MeshBasicMaterial({ color: offHex });
+        const front = new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), mat);
+        front.position.set(x, y, z + 0.29);
+        S.scene.add(front);
+        const back = new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), mat);
+        back.position.set(x, y, z - 0.29);
+        S.scene.add(back);
+        return { material: mat };
       };
-      // Lenses on both faces so drivers on the NS road see the signal.
-      const red = mkLens(0x331111, 6.05, 0.29);
-      mkLens(0x331111, 6.05, -0.29).material = red.material;
-      const yellow = mkLens(0x332a10, 5.6, 0.29);
-      mkLens(0x332a10, 5.6, -0.29).material = yellow.material;
-      const green = mkLens(0x14301c, 5.15, 0.29);
-      mkLens(0x14301c, 5.15, -0.29).material = green.material;
+      const red = lens(0x331111, 6.05);
+      const yellow = lens(0x332a10, 5.6);
+      const green = lens(0x14301c, 5.15);
       S.trafficLights.push({ x, z, red, yellow, green });
     }
   }
@@ -775,20 +783,23 @@ function buildTrafficLights() {
 function buildStreetProps() {
   const binMat = lambert(0x2a5a3a);
   const hydMat = lambert(0xc22a2a);
+  const binGeo = new THREE.CylinderGeometry(0.45, 0.4, 0.95, 8);
+  const hydGeo = new THREE.CylinderGeometry(0.26, 0.3, 0.7, 8);
+  const hydTopGeo = new THREE.SphereGeometry(0.26, 8, 6);
   // Bins + hydrants near intersections.
   for (let i = 0; i < 16; i++) {
     const rx = WORLD.roads[i % WORLD.roads.length];
     const rz = WORLD.roads[(i * 2) % WORLD.roads.length];
     const bx = rx + 6.5, bz = rz - 6.5;
-    const bin = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.4, 0.95, 8), binMat);
+    const bin = new THREE.Mesh(binGeo, binMat);
     bin.position.set(bx, 0.48, bz);
     bin.castShadow = true;
     S.scene.add(bin);
-    const hyd = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.3, 0.7, 8), hydMat);
+    const hyd = new THREE.Mesh(hydGeo, hydMat);
     hyd.position.set(bx + 1.6, 0.35, bz);
     hyd.castShadow = true;
     S.scene.add(hyd);
-    const hydTop = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 6), hydMat);
+    const hydTop = new THREE.Mesh(hydTopGeo, hydMat);
     hydTop.position.set(bx + 1.6, 0.75, bz);
     S.scene.add(hydTop);
   }

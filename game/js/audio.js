@@ -1,4 +1,4 @@
-// Solmar City — synthesized WebAudio sound (v3 rewrite).
+// Solmar City — synthesized WebAudio sound (v4 polish, re-implemented).
 // Every sound is generated, no audio files: engine hum, siren, gunshot,
 // punch, pickup, mission jingle, crash, horn, reload click.
 
@@ -96,7 +96,8 @@ export function buildAudio() {
       sirenTimer += 1;
       const vol = S.muted ? 0 : Math.max(0, 0.05 - dist * 0.0006);
       sirenGain.gain.value = vol;
-      sirenOsc.frequency.value = (Math.sin(S.time * 4) > 0 ? 950 : 700);
+      const hi = Math.sin(S.time * 4) > 0;
+      sirenOsc.frequency.value = hi ? 950 : 700;
     },
     sirenBurst() { blip(950, 0.4, 'sine', 0.15, 700); },
     gunshot() { noise(0.14, 0.5, 3000); blip(160, 0.1, 'square', 0.25, 60); },

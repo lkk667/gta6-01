@@ -1,4 +1,4 @@
-// Solmar City — cars: factory, arcade driving, enter/exit/steal (v4 polish).
+// Solmar City — cars: factory, arcade driving, enter/exit/steal (v4 polish, re-implemented).
 // Police cruisers are black-and-white with a big light bar and flashing
 // glow halos, so they read as police at distance instead of black traffic.
 
@@ -26,20 +26,27 @@ function glowSprite(color) {
   return sp;
 }
 
-function groundGlowMesh(color) {
-  const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 64;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);
-  grad.addColorStop(0, color);
-  grad.addColorStop(0.5, color.replace('1)', '0.4)'));
-  grad.addColorStop(1, color.replace('1)', '0)'));
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
+// Flat radial glow pools on the road (police light spill): one cached
+// canvas texture per colour, drawn on a ground-hugging plane.
+const groundGlowCache = new Map();
+function groundGlowMesh(rgba) {
+  let tex = groundGlowCache.get(rgba);
+  if (!tex) {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+    const stops = [[0, rgba], [0.5, rgba.replace('1)', '0.4)')], [1, rgba.replace('1)', '0)')]];
+    for (const [pos, col] of stops) grad.addColorStop(pos, col);
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    tex = new THREE.CanvasTexture(c);
+    groundGlowCache.set(rgba, tex);
+  }
   const m = new THREE.Mesh(
     new THREE.PlaneGeometry(3.4, 4.6),
-    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, opacity: 0.5 })
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.5 })
   );
   m.rotation.x = -Math.PI / 2;
   m.position.y = 0.04;
@@ -78,81 +85,67 @@ export function makeCar(color, police, kind) {
   const bodyMat = new THREE.MeshLambertMaterial({
     color: police ? 0xf2f2f2 : isTaxi ? 0xe8c832 : paint,
   });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(isTruck ? 2.0 : 1.9, isTruck ? 0.7 : 0.62, bodyLen), bodyMat);
-  body.position.y = isTruck ? 0.68 : 0.62;
+  // Local helpers: a box added to the group, and a glass pane.
+  const addBox = (w, h, d, mat, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    group.add(m);
+    return m;
+  };
+  const addPane = (w, h, mat, x, y, z, ry) => {
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    p.position.set(x, y, z);
+    if (ry) p.rotation.y = ry;
+    group.add(p);
+    return p;
+  };
+  const body = addBox(isTruck ? 2.0 : 1.9, isTruck ? 0.7 : 0.62, bodyLen, bodyMat, 0, isTruck ? 0.68 : 0.62, 0);
   body.castShadow = true;
-  group.add(body);
   // Glasshouse: dark-tinted cabin + separate glass panes so cars stop
   // reading as flat boxes — windshield, side windows, rear window.
   const glassMat = new THREE.MeshLambertMaterial({ color: 0x101c28 });
   const glassEdge = new THREE.MeshBasicMaterial({ color: 0x3a5a78 });
-  let cabin, cabinZ;
+  let cabinZ;
   if (isTruck) {
     cabinZ = 1.55;
-    cabin = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.85, 1.5), new THREE.MeshLambertMaterial({ color: 0x2a4a6a }));
-    cabin.position.set(0, 1.5, cabinZ);
-    cabin.castShadow = true;
-    group.add(cabin);
-    const cargo = new THREE.Mesh(new THREE.BoxGeometry(1.95, 1.25, 2.7), new THREE.MeshLambertMaterial({ color: 0xb8bcc2 }));
-    cargo.position.set(0, 1.55, -1.1);
+    const cab = addBox(1.9, 0.85, 1.5, new THREE.MeshLambertMaterial({ color: 0x2a4a6a }), 0, 1.5, cabinZ);
+    cab.castShadow = true;
+    const cargo = addBox(1.95, 1.25, 2.7, new THREE.MeshLambertMaterial({ color: 0xb8bcc2 }), 0, 1.55, -1.1);
     cargo.castShadow = true;
-    group.add(cargo);
     // Cargo ribs.
     for (const rz of [-2.1, -1.1, -0.1]) {
-      const rib = new THREE.Mesh(new THREE.BoxGeometry(1.97, 1.27, 0.08), new THREE.MeshLambertMaterial({ color: 0x8a8e94 }));
-      rib.position.set(0, 1.55, rz);
-      group.add(rib);
+      addBox(1.97, 1.27, 0.08, new THREE.MeshLambertMaterial({ color: 0x8a8e94 }), 0, 1.55, rz);
     }
   } else {
     cabinZ = -0.25;
     // Police cabin is WHITE with dark glass: from behind, a white cabin +
-    // black roof + light bar reads as a police car; a black cabin (v4's
-    // first run) made the whole cruiser read as a black traffic car.
-    cabin = new THREE.Mesh(
-      new THREE.BoxGeometry(1.7, 0.55, 2.2),
-      new THREE.MeshLambertMaterial({ color: police ? 0xf2f2f2 : 0x223344 })
-    );
-    cabin.position.set(0, 1.18, cabinZ);
-    cabin.castShadow = true;
-    group.add(cabin);
+    // black roof + light bar reads as a police car; a black cabin made the
+    // whole cruiser read as a black traffic car.
+    const cabMat = new THREE.MeshLambertMaterial({ color: police ? 0xf2f2f2 : 0x223344 });
+    const cab = addBox(1.7, 0.55, 2.2, cabMat, 0, 1.18, cabinZ);
+    cab.castShadow = true;
   }
   const winZ = cabinZ + (isTruck ? 0.78 : 1.12);
-  const windshield = new THREE.Mesh(new THREE.PlaneGeometry(isTruck ? 1.7 : 1.5, isTruck ? 0.6 : 0.5), glassMat);
-  windshield.position.set(0, isTruck ? 1.55 : 1.22, winZ);
+  const winW = isTruck ? 1.7 : 1.5;
+  const winY = isTruck ? 1.55 : 1.22;
+  const windshield = addPane(winW, isTruck ? 0.6 : 0.5, glassMat, 0, winY, winZ);
   windshield.rotation.x = -0.28;
-  group.add(windshield);
-  const winEdge = new THREE.Mesh(new THREE.PlaneGeometry(isTruck ? 1.7 : 1.5, 0.05), glassEdge);
-  winEdge.position.set(0, isTruck ? 1.88 : 1.46, winZ + 0.08);
+  const winEdge = addPane(winW, 0.05, glassEdge, 0, isTruck ? 1.88 : 1.46, winZ + 0.08);
   winEdge.rotation.x = -0.28;
-  group.add(winEdge);
   for (const s of [-1, 1]) {
-    const side = new THREE.Mesh(new THREE.PlaneGeometry(isTruck ? 1.2 : 1.9, 0.42), glassMat);
-    side.position.set(s * (isTruck ? 0.96 : 0.86), isTruck ? 1.55 : 1.2, cabinZ);
-    side.rotation.y = s * Math.PI / 2;
-    group.add(side);
+    addPane(isTruck ? 1.2 : 1.9, 0.42, glassMat, s * (isTruck ? 0.96 : 0.86), isTruck ? 1.55 : 1.2, cabinZ, s * Math.PI / 2);
   }
-  const rear = new THREE.Mesh(new THREE.PlaneGeometry(isTruck ? 1.7 : 1.5, 0.45), glassMat);
-  rear.position.set(0, isTruck ? 1.55 : 1.2, cabinZ - (isTruck ? 0.78 : 1.12));
-  rear.rotation.y = Math.PI;
-  group.add(rear);
+  addPane(winW, 0.45, glassMat, 0, isTruck ? 1.55 : 1.2, cabinZ - (isTruck ? 0.78 : 1.12), Math.PI);
 
   if (police) {
     // Black hood + roof on a white body, black door stripes, big light bar.
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.1, 1.0), new THREE.MeshLambertMaterial({ color: 0x14161a }));
-    hood.position.set(0, 0.94, 1.62);
-    group.add(hood);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.08, 2.0), new THREE.MeshLambertMaterial({ color: 0x14161a }));
-    roof.position.set(0, 1.48, -0.25);
-    group.add(roof);
+    addBox(1.92, 0.1, 1.0, new THREE.MeshLambertMaterial({ color: 0x14161a }), 0, 0.94, 1.62);
+    addBox(1.72, 0.08, 2.0, new THREE.MeshLambertMaterial({ color: 0x14161a }), 0, 1.48, -0.25);
     for (const s of [-1, 1]) {
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.3, 2.1), new THREE.MeshLambertMaterial({ color: 0x14161a }));
-      stripe.position.set(s * 0.96, 0.72, -0.2);
-      group.add(stripe);
+      addBox(0.04, 0.3, 2.1, new THREE.MeshLambertMaterial({ color: 0x14161a }), s * 0.96, 0.72, -0.2);
     }
     // BIG light bar: wide red/blue blocks with glow halos.
-    const barBase = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.16, 0.5), new THREE.MeshLambertMaterial({ color: 0x222222 }));
-    barBase.position.set(0, 1.56, -0.25);
-    group.add(barBase);
+    addBox(1.7, 0.16, 0.5, new THREE.MeshLambertMaterial({ color: 0x222222 }), 0, 1.56, -0.25);
     const red = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.24, 0.46), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
     red.position.set(-0.44, 1.74, -0.25);
     group.add(red);
@@ -184,12 +177,10 @@ export function makeCar(color, police, kind) {
     // Checker band along the doors + a lit TAXI roof sign.
     for (const s of [-1, 1]) {
       for (let i = 0; i < 6; i++) {
-        const sq = new THREE.Mesh(
-          new THREE.BoxGeometry(0.03, 0.22, 0.3),
-          new THREE.MeshLambertMaterial({ color: i % 2 ? 0x1c1e22 : 0xf2f2f2 })
-        );
-        sq.position.set(s * 0.96, 0.78, -1.2 + i * 0.48);
-        group.add(sq);
+        const sq = addBox(0.03, 0.22, 0.3,
+          new THREE.MeshLambertMaterial({ color: i % 2 ? 0x1c1e22 : 0xf2f2f2 }),
+          s * 0.96, 0.78, -1.2 + i * 0.48);
+        void sq;
       }
     }
     const roofSign = new THREE.Mesh(
@@ -222,12 +213,8 @@ export function makeCar(color, police, kind) {
   const plateMat = new THREE.MeshBasicMaterial({ color: 0xf2f2f2 });
   for (const s of [1, -1]) {
     const bz = s * (bodyLen / 2 + 0.02);
-    const bump = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.18, 0.22), bumpMat);
-    bump.position.set(0, 0.42, bz);
-    group.add(bump);
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.15, 0.04), plateMat);
-    plate.position.set(0, 0.52, s * (bodyLen / 2 + 0.14));
-    group.add(plate);
+    addBox(1.95, 0.18, 0.22, bumpMat, 0, 0.42, bz);
+    addBox(0.52, 0.15, 0.04, plateMat, 0, 0.52, s * (bodyLen / 2 + 0.14));
   }
   // Headlights (warm glow at dusk) + glowing taillights.
   const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b8 });

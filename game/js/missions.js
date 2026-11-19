@@ -1,4 +1,4 @@
-// Solmar City — the five story missions (v4 polish).
+// Solmar City — the five story missions (v4 polish, re-implemented).
 // Toasts are cleared the instant a mission completes or starts, and the
 // reward banner goes out first with the next mission's title ~1.5 s later,
 // so banners never stack four deep. The gold beacon is brighter now, and
@@ -49,8 +49,7 @@ function buildBeacon() {
     new THREE.MeshBasicMaterial({ color: 0xffd94a })
   );
   cone.rotation.x = Math.PI / 2;
-  cone.scale.y = 1;
-  cone.scale.z = 0.35;
+  cone.scale.set(1, 1, 0.35);
   arrow.add(cone);
   const shaft = new THREE.Mesh(
     new THREE.BoxGeometry(0.3, 0.08, 0.9),
@@ -93,13 +92,13 @@ export function updateBeacon(dt) {
   // On foot only: from the low chase camera it looms over the car and
   // reads as a paper plane in the cover shot.
   const p = S.player;
-  if (p && S.navArrow) {
-    const a = S.navArrow;
-    a.visible = !!S.onFoot;
-    if (!a.visible) return;
-    a.position.set(p.pos.x, 2.5 + Math.sin(S.beacon.pulse * 2.5) * 0.15, p.pos.z);
-    a.rotation.y = Math.atan2(S.beacon.target.x - p.pos.x, S.beacon.target.z - p.pos.z);
-  }
+  const a = S.navArrow;
+  if (!p || !a) return;
+  a.visible = !!S.onFoot;
+  if (!a.visible) return;
+  const bob = 2.5 + Math.sin(S.beacon.pulse * 2.5) * 0.15;
+  a.position.set(p.pos.x, bob, p.pos.z);
+  a.rotation.y = Math.atan2(S.beacon.target.x - p.pos.x, S.beacon.target.z - p.pos.z);
 }
 
 const MISSIONS = [

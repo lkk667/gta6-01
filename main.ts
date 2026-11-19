@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
+// Output dir is argv[2] when given, /output otherwise.
 const outDir = resolve(process.argv[2] || '/output');
 
 mkdirSync(outDir, { recursive: true });
@@ -23,4 +24,5 @@ const dossier = buildDossier(outDir, {
   game_max_bytes: 50331648,
 });
 writeFileSync(resolve(outDir, 'dossier.json'), dossier);
-console.log(`Solmar City entry written to ${outDir} (dossier.json: ${dossier.length} bytes)`);
+const msg = `Solmar City entry written to ${outDir} (dossier.json: ${dossier.length} bytes)`;
+console.log(msg);

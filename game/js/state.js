@@ -1,4 +1,4 @@
-// Solmar City — shared state (v4 polish).
+// Solmar City — shared state (v4 polish, re-implemented).
 // One mutable world object every system reads and writes. No network, no
 // imports from other game modules: this file stands alone.
 

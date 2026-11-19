@@ -1,4 +1,4 @@
-// Solmar City — combat: pistol, punch, pickups (v4 polish).
+// Solmar City — combat: pistol, punch, pickups (v4 polish, re-implemented).
 // The muzzle flash lives on the gun mesh itself (player.js), so the flash
 // can never sit apart from the barrel the way a camera-relative flash did.
 
@@ -22,9 +22,8 @@ function getSmokeTex() {
   c.height = 64;
   const g = c.getContext('2d');
   const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);
-  grad.addColorStop(0, 'rgba(200,200,200,0.55)');
-  grad.addColorStop(0.6, 'rgba(180,180,180,0.25)');
-  grad.addColorStop(1, 'rgba(180,180,180,0)');
+  const stops = [[0, 'rgba(200,200,200,0.55)'], [0.6, 'rgba(180,180,180,0.25)'], [1, 'rgba(180,180,180,0)']];
+  for (const [pos, col] of stops) grad.addColorStop(pos, col);
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 64);
   smokeTex = new THREE.CanvasTexture(c);
@@ -33,7 +32,8 @@ function getSmokeTex() {
 
 function spawnSmoke(pos) {
   for (let i = 0; i < 2; i++) {
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: getSmokeTex(), transparent: true, depthWrite: false, opacity: 0.6 }));
+    const mat = new THREE.SpriteMaterial({ map: getSmokeTex(), transparent: true, depthWrite: false, opacity: 0.6 });
+    const sp = new THREE.Sprite(mat);
     sp.position.copy(pos);
     sp.position.x += (Math.random() - 0.5) * 0.3;
     sp.position.y += (Math.random() - 0.5) * 0.2;

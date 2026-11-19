@@ -1,4 +1,4 @@
-// Solmar City — bootstrap, game loop, menus, staging (v4 polish).
+// Solmar City — bootstrap, game loop, menus, staging (v4 polish, re-implemented).
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, WORLD, LANDMARKS, toast } from './state.js';
@@ -28,12 +28,9 @@ function buildLights() {
   sun.position.set(-180, 62, 55);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.left = -210;
-  sun.shadow.camera.right = 210;
-  sun.shadow.camera.top = 210;
-  sun.shadow.camera.bottom = -210;
-  sun.shadow.camera.near = 10;
-  sun.shadow.camera.far = 520;
+  const sc = sun.shadow.camera;
+  sc.left = -210; sc.right = 210; sc.top = 210; sc.bottom = -210;
+  sc.near = 10; sc.far = 520;
   sun.shadow.bias = -0.0006;
   S.scene.add(sun);
   S.scene.add(sun.target);
@@ -234,10 +231,8 @@ export function stageCity() {
   makeOfficer(2.6, -13.5, Math.PI * 0.85);
   // Keep the frame clear of stray traffic right by the player.
   for (const t of S.trafficCars) {
-    if (Math.abs(t.mesh.position.x) < 12 && Math.abs(t.mesh.position.z) < 12) {
-      t.mesh.position.x = 120;
-      t.mesh.position.z = -120;
-    }
+    if (Math.abs(t.mesh.position.x) >= 12 || Math.abs(t.mesh.position.z) >= 12) continue;
+    t.mesh.position.set(120, 0, -120);
   }
   // Street life in frame: two pedestrians crossing ahead, one fleeing the shot.
   stagePeds([[3.5, -8, 0.4], [-4, -6, -0.5], [-1.5, -22, 2.8]]);
@@ -248,14 +243,15 @@ export function stageCity() {
 // Move the first few pedestrians to fixed spots (x, z, heading) so a staged
 // shot has street life in frame instead of an empty street.
 function stagePeds(spots) {
-  spots.forEach(([x, z, h], i) => {
+  for (let i = 0; i < spots.length; i++) {
     const ped = S.peds[i];
-    if (!ped) return;
+    if (!ped) continue;
+    const [x, z, h] = spots[i];
     ped.mesh.position.set(x, 0, z);
     ped.heading = h;
     ped.fleeTimer = 0;
     ped.retarget = 5;
-  });
+  }
 }
 
 export function stageMission() {
@@ -264,9 +260,6 @@ export function stageMission() {
   S.debug.longRewardToast = true;
   S.debug.holdReward = true; // keep the reward banner alone for the shot
   const p = S.player;
-  p.pos.x = LANDMARKS.marinaPark.x;
-  p.pos.z = LANDMARKS.marinaPark.z + 12;
-  p.group.position.set(p.pos.x, 0, p.pos.z);
   // Face Solmar Tower down a clear sightline: stand on road z=-80 looking
   // east. The tower's south face is 20 m north of that road, and no nearer
   // tower stands in the same column (looking north from road x=80, the
@@ -299,7 +292,7 @@ export function stageFoot() {
   // On road z=-40, facing Cafe Luna. Framing math: the rooftop sign tops
   // out at y≈17, so the camera must sit low and look UP — camPitch is
   // negative here (pitch raises the camera and looks down, which hides the
-  // sign; v4's first attempt used +0.24 and lost the sign completely).
+  // sign; the first attempt used +0.24 and lost the sign completely).
   // camDist 14 + pitch -0.1 puts the sign top just inside the frame.
   p.pos.x = -60;
   p.pos.z = -40;

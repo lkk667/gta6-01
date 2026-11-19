@@ -1,4 +1,4 @@
-// Solmar City — wanted level, police cruisers, BUSTED (v4 polish).
+// Solmar City — wanted level, police cruisers, BUSTED (v4 polish, re-implemented).
 // Cruisers are faster than the player now (32 + 1.5/star vs the player's 34),
 // so a chase stays a chase; their light bars flash red/blue with glow halos.
 
@@ -8,6 +8,20 @@ import { makeCar } from './vehicles.js';
 import { resolveCollisions, attachBlob } from './city.js';
 
 let spawnTimer = 0;
+
+// One place for the light-bar flash state: lenses, glow halos, and the
+// red/blue pools on the road under the cruiser.
+function setFlash(ud, redOn) {
+  if (!ud.redLens) return;
+  ud.redLens.material.color.setHex(redOn ? 0xff2a2a : 0x5a1414);
+  ud.blueLens.material.color.setHex(redOn ? 0x142a5a : 0x2a6aff);
+  ud.redGlow.material.opacity = redOn ? 0.95 : 0.12;
+  ud.blueGlow.material.opacity = redOn ? 0.12 : 0.95;
+  if (ud.redGround) {
+    ud.redGround.material.opacity = redOn ? 0.55 : 0.08;
+    ud.blueGround.material.opacity = redOn ? 0.08 : 0.55;
+  }
+}
 
 export function wantedStars() {
   return starsFromHeat(S.heat);
@@ -69,18 +83,7 @@ export function updatePolice(dt) {
       // Staged shot: the cruiser holds its pose (lights still flash below).
       c.mesh.rotation.y = c.heading;
       c.flashPhase += dt * 7;
-      const redOn = Math.sin(c.flashPhase) > 0;
-      const ud0 = c.mesh.userData;
-      if (ud0.redLens) {
-        ud0.redLens.material.color.setHex(redOn ? 0xff2a2a : 0x5a1414);
-        ud0.blueLens.material.color.setHex(redOn ? 0x142a5a : 0x2a6aff);
-        ud0.redGlow.material.opacity = redOn ? 0.95 : 0.12;
-        ud0.blueGlow.material.opacity = redOn ? 0.12 : 0.95;
-        if (ud0.redGround) {
-          ud0.redGround.material.opacity = redOn ? 0.55 : 0.08;
-          ud0.blueGround.material.opacity = redOn ? 0.08 : 0.55;
-        }
-      }
+      setFlash(c.mesh.userData, Math.sin(c.flashPhase) > 0);
       continue;
     }
     if (S.debug.pacing && c.pace && S.currentCar) {
@@ -130,18 +133,7 @@ export function updatePolice(dt) {
     // Flashing light bar: alternate red / blue, glow sprites pulse with it,
     // and the red/blue ground reflections under the cruiser pulse too.
     c.flashPhase += dt * 7;
-    const redOn = Math.sin(c.flashPhase) > 0;
-    const ud = c.mesh.userData;
-    if (ud.redLens) {
-      ud.redLens.material.color.setHex(redOn ? 0xff2a2a : 0x5a1414);
-      ud.blueLens.material.color.setHex(redOn ? 0x142a5a : 0x2a6aff);
-      ud.redGlow.material.opacity = redOn ? 0.95 : 0.12;
-      ud.blueGlow.material.opacity = redOn ? 0.12 : 0.95;
-      if (ud.redGround) {
-        ud.redGround.material.opacity = redOn ? 0.55 : 0.08;
-        ud.blueGround.material.opacity = redOn ? 0.08 : 0.55;
-      }
-    }
+    setFlash(c.mesh.userData, Math.sin(c.flashPhase) > 0);
     if (S.audio && d < 60) S.audio.siren(d);
   }
 
