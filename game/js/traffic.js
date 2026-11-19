@@ -1,4 +1,4 @@
-// Solmar City — traffic cars and pedestrians (v3 rewrite).
+// Solmar City — traffic cars and pedestrians (v4 polish).
 // 14 cars loop the road grid; 26 pedestrians walk the sidewalks, flee
 // gunfire, and — new in v3 — dodge cars coming at them instead of standing
 // in the road while a car passes through them.
@@ -6,36 +6,70 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { S, WORLD, dist2, clamp } from './state.js';
 import { makeCar } from './vehicles.js';
-import { attachBlob, resolveCollisions } from './city.js';
+import { attachBlob, resolveCollisions, trafficLightState } from './city.js';
 
-const PED_SHIRTS = [0xe84a4a, 0x4a8ae8, 0x4ad87a, 0xe8d84a, 0xd87ab8, 0x7ad8d8, 0xf2f2f2, 0x8a5a3a];
+const PED_SHIRTS = [0xe84a4a, 0x4a8ae8, 0x4ad87a, 0xe8d84a, 0xd87ab8, 0x7ad8d8, 0xf2f2f2, 0x8a5a3a, 0xe87a2a, 0x9a6ad8, 0x3a8a6a, 0xd8d8d8];
+const PED_SKINS = [0xe8b88a, 0xc88a5a, 0x8a5a34, 0xf2c8a0];
+const PED_PANTS = [0x2c2f36, 0x3a4a6a, 0x6a3a3a, 0x4a5a3a, 0x8a7a5a];
 
 function buildPedestrian() {
   const g = new THREE.Group();
   const shirt = new THREE.MeshLambertMaterial({ color: PED_SHIRTS[Math.floor(Math.random() * PED_SHIRTS.length)] });
-  const skin = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
+  const skin = new THREE.MeshLambertMaterial({ color: PED_SKINS[Math.floor(Math.random() * PED_SKINS.length)] });
+  const pants = new THREE.MeshLambertMaterial({ color: PED_PANTS[Math.floor(Math.random() * PED_PANTS.length)] });
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.62, 0.3), shirt);
   torso.position.y = 1.05;
+  torso.castShadow = true;
   g.add(torso);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 10, 8), skin);
   head.position.y = 1.6;
+  head.castShadow = true;
   g.add(head);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.68, 0.2), pants);
-  legL.position.set(-0.14, 0.34, 0);
+  // Varied looks: a cap, hair, or bare head.
+  const roll = Math.random();
+  if (roll < 0.35) {
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.25, 0.09, 10), new THREE.MeshLambertMaterial({ color: PED_SHIRTS[Math.floor(Math.random() * PED_SHIRTS.length)] }));
+    cap.position.y = 1.79;
+    g.add(cap);
+  } else if (roll < 0.65) {
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x2c2018 }));
+    hair.position.y = 1.62;
+    g.add(hair);
+  }
+  // Legs pivot at the hip, arms at the shoulder, so the walk swing reads.
+  const legGeo = new THREE.BoxGeometry(0.19, 0.68, 0.2);
+  legGeo.translate(0, -0.34, 0);
+  const legL = new THREE.Mesh(legGeo, pants);
+  legL.position.set(-0.14, 0.68, 0);
   g.add(legL);
   const legR = legL.clone();
   legR.position.x = 0.14;
   g.add(legR);
-  return { group: g, legL, legR };
+  const armGeo = new THREE.BoxGeometry(0.16, 0.62, 0.18);
+  armGeo.translate(0, -0.31, 0);
+  const armL = new THREE.Mesh(armGeo, shirt);
+  armL.position.set(-0.37, 1.32, 0);
+  g.add(armL);
+  const armR = armL.clone();
+  armR.position.x = 0.37;
+  g.add(armR);
+  // Varied height: not every pedestrian is the same cut-out.
+  const s = 0.92 + Math.random() * 0.16;
+  g.scale.set(s, s, s);
+  return { group: g, legL, legR, armL, armR };
 }
 
 export function buildTraffic() {
-  // Traffic cars: pick a road, drive along it, turn at random intersections.
-  for (let i = 0; i < 14; i++) {
+  // Traffic cars: 28, spread round-robin over the roads so every street
+  // carries 3–4 moving cars (v3 had 14 across the whole city). Mixed
+  // models: mostly sedans, some taxis, a few trucks.
+  const roads = [...WORLD.roads];
+  for (let i = 0; i < 28; i++) {
     const alongX = Math.random() > 0.5;
-    const road = WORLD.roads[Math.floor(Math.random() * WORLD.roads.length)];
-    const mesh = makeCar(undefined, false);
+    const road = roads[i % roads.length];
+    const kr = Math.random();
+    const kind = kr < 0.2 ? 'taxi' : kr < 0.35 ? 'truck' : 'sedan';
+    const mesh = makeCar(undefined, false, kind);
     const x = alongX ? -160 + Math.random() * 320 : road + (Math.random() > 0.5 ? 2.4 : -2.4);
     const z = alongX ? road + (Math.random() > 0.5 ? 2.4 : -2.4) : -160 + Math.random() * 320;
     mesh.position.set(x, 0, z);
@@ -51,8 +85,8 @@ export function buildTraffic() {
       cruise: 7 + Math.random() * 4,
     });
   }
-  // Pedestrians: sidewalk wanderers near the centre and the park.
-  for (let i = 0; i < 26; i++) {
+  // Pedestrians: 40 sidewalk wanderers near the centre, the park and the cafe.
+  for (let i = 0; i < 40; i++) {
     const built = buildPedestrian();
     const x = -140 + Math.random() * 280;
     const z = -140 + Math.random() * 280;
@@ -63,6 +97,8 @@ export function buildTraffic() {
       mesh: built.group,
       legL: built.legL,
       legR: built.legR,
+      armL: built.armL,
+      armR: built.armR,
       heading: Math.random() * Math.PI * 2,
       speed: 1.1 + Math.random() * 0.9,
       walkPhase: Math.random() * 6,
@@ -109,6 +145,7 @@ function nearbyCarThreat(ped) {
 }
 
 export function updateTraffic(dt) {
+  if (S.debug.freezeTraffic) return; // staged shot: cars hold their poses
   for (const c of S.trafficCars) {
     // Brake for a pedestrian directly ahead in the road.
     let target = c.cruise;
@@ -120,6 +157,24 @@ export function updateTraffic(dt) {
       const ahead = dx * fx + dz * fz;
       const side = Math.abs(dx * fz - dz * fx);
       if (ahead > 0 && ahead < 9 && side < 2.2) target = 0;
+    }
+    // Obey traffic lights: stop at red, ease off at yellow.
+    if (S.trafficLights) {
+      const fx = Math.sin(c.heading);
+      const fz = Math.cos(c.heading);
+      const axis = Math.abs(fx) > 0.7 ? 'ew' : 'ns';
+      for (const L of S.trafficLights) {
+        const dx = L.x - c.mesh.position.x;
+        const dz = L.z - c.mesh.position.z;
+        const ahead = dx * fx + dz * fz;
+        const side = Math.abs(dx * fz - dz * fx);
+        if (ahead > 0 && ahead < 14 && side < 9) {
+          const st = trafficLightState(axis);
+          if (st === 'red') target = 0;
+          else if (st === 'yellow') target = Math.min(target, 3);
+          break;
+        }
+      }
     }
     // Ease off near the player's car too.
     if (S.currentCar) {
@@ -187,5 +242,8 @@ export function updatePeds(dt) {
     const swing = Math.min(1, speed / 4) * 0.5;
     ped.legL.rotation.x = Math.sin(ped.walkPhase) * swing;
     ped.legR.rotation.x = -Math.sin(ped.walkPhase) * swing;
+    // Arms swing opposite the legs (shoulder pivots, not stick figures).
+    ped.armL.rotation.x = -Math.sin(ped.walkPhase) * swing * 0.9;
+    ped.armR.rotation.x = Math.sin(ped.walkPhase) * swing * 0.9;
   }
 }

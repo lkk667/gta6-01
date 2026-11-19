@@ -1,5 +1,5 @@
 // Solmar City — HUD: stars, cash, health, ammo, objective, speed, toasts,
-// live minimap (v3 rewrite). Stars and cash sit on a translucent panel now;
+// live minimap (v4 polish). Stars and cash sit on a translucent panel now;
 // unlit stars are bright-outlined, lit stars glow gold; health and ammo get
 // icons and bigger numbers; the speedometer hides while on foot; minimap
 // police dots are big and flash red/blue.
@@ -78,22 +78,24 @@ function drawMinimap(stars) {
   g.clearRect(0, 0, W, H);
   g.fillStyle = '#101418';
   g.fillRect(0, 0, W, H);
-  // Ocean + sand at the south edge.
+  // Ocean + sand at the south edge (deep dusk blue water).
   const [, oceanY] = toMap(0, WORLD.half);
-  g.fillStyle = '#2a7ab8';
+  g.fillStyle = '#2a4a7a';
   g.fillRect(0, oceanY, W, H - oceanY);
   g.fillStyle = '#e8d8a0';
   g.fillRect(0, oceanY - 4, W, 4);
   // City blocks first, then roads over them, so roads read as streets.
-  g.fillStyle = '#2e3440';
+  // Blocks get slightly varied dusk colours instead of one flat grey.
+  const blockCols = ['#2e3440', '#38343e', '#33302e', '#2e3a40'];
   for (const rx of WORLD.roads) {
     for (const rz of WORLD.roads) {
       const [bx, by] = toMap(rx + 5, rz + 5);
+      g.fillStyle = blockCols[Math.abs((rx + rz) / 40) % blockCols.length];
       g.fillRect(bx, by, 30 * scale, 30 * scale);
     }
   }
-  g.strokeStyle = '#8a93a3';
-  g.lineWidth = 3;
+  g.strokeStyle = '#aab3c3';
+  g.lineWidth = 5;
   for (const r of WORLD.roads) {
     const [x1, y1] = toMap(r, -WORLD.half);
     const [x2, y2] = toMap(r, WORLD.half);
@@ -102,16 +104,29 @@ function drawMinimap(stars) {
     const [bx, by] = toMap(WORLD.half, r);
     g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
   }
+  // Compass: the map is north-up, so N sits at the top edge.
+  g.font = 'bold 12px Arial, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'top';
+  g.lineWidth = 3;
+  g.strokeStyle = 'rgba(0,0,0,0.8)';
+  g.strokeText('N', W / 2, 3);
+  g.fillStyle = '#ffffff';
+  g.fillText('N', W / 2, 3);
   // Park.
   const [pkx, pky] = toMap(25, 25);
   g.fillStyle = '#4c8a3c';
   g.fillRect(pkx, pky, 30 * scale, 30 * scale);
-  // Mission beacon: big pulsing gold dot.
+  // Mission beacon: big pulsing gold dot with a glow halo.
   if (S.beacon && S.beacon.group.visible) {
     const [bx, by] = toMap(S.beacon.target.x, S.beacon.target.z);
     const pulse = 5 + Math.sin(S.time * 4) * 1.5;
+    g.save();
+    g.shadowColor = '#ffd94a';
+    g.shadowBlur = 10;
     g.fillStyle = '#ffd94a';
     g.beginPath(); g.arc(bx, by, pulse, 0, Math.PI * 2); g.fill();
+    g.restore();
     g.strokeStyle = '#fff2b8';
     g.lineWidth = 1.5;
     g.beginPath(); g.arc(bx, by, pulse + 2.5, 0, Math.PI * 2); g.stroke();

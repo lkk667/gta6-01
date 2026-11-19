@@ -1,4 +1,4 @@
-// Solmar City — the five story missions (v3 rewrite).
+// Solmar City — the five story missions (v4 polish).
 // Toasts are cleared the instant a mission completes or starts, and the
 // reward banner goes out first with the next mission's title ~1.5 s later,
 // so banners never stack four deep. The gold beacon is brighter now, and
@@ -41,6 +41,29 @@ function buildBeacon() {
   group.visible = false;
   S.scene.add(group);
   S.beacon = { group, ring, pillar, gem, target: { x: 0, z: 0 }, pulse: 0 };
+  // 3D navigation arrow: a gold chevron that floats above the player and
+  // points at the mission target, so the way is visible without the minimap.
+  const arrow = new THREE.Group();
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.55, 1.7, 4),
+    new THREE.MeshBasicMaterial({ color: 0xffd94a })
+  );
+  cone.rotation.x = Math.PI / 2;
+  cone.scale.y = 1;
+  cone.scale.z = 0.35;
+  arrow.add(cone);
+  const shaft = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.08, 0.9),
+    new THREE.MeshBasicMaterial({ color: 0xffd94a })
+  );
+  shaft.position.z = -0.9;
+  arrow.add(shaft);
+  // Small and low, hugging the player like a quest marker — the first
+  // version (scale 1, y 3.4) read as a paper plane floating in the sky.
+  arrow.scale.set(0.55, 0.55, 0.55);
+  arrow.visible = false;
+  S.scene.add(arrow);
+  S.navArrow = arrow;
   return S.beacon;
 }
 
@@ -53,15 +76,30 @@ function moveBeacon(x, z) {
 
 function hideBeacon() {
   if (S.beacon) S.beacon.group.visible = false;
+  if (S.navArrow) S.navArrow.visible = false;
 }
 
 export function updateBeacon(dt) {
-  if (!S.beacon || !S.beacon.group.visible) return;
+  if (!S.beacon || !S.beacon.group.visible) {
+    if (S.navArrow) S.navArrow.visible = false;
+    return;
+  }
   S.beacon.pulse += dt;
   const s = 1 + Math.sin(S.beacon.pulse * 3) * 0.12;
   S.beacon.ring.scale.set(s, s, 1);
   S.beacon.gem.rotation.y += dt * 2;
   S.beacon.gem.position.y = 6 + Math.sin(S.beacon.pulse * 2) * 0.5;
+  // Nav arrow hovers just above the player, pointing at the beacon target.
+  // On foot only: from the low chase camera it looms over the car and
+  // reads as a paper plane in the cover shot.
+  const p = S.player;
+  if (p && S.navArrow) {
+    const a = S.navArrow;
+    a.visible = !!S.onFoot;
+    if (!a.visible) return;
+    a.position.set(p.pos.x, 2.5 + Math.sin(S.beacon.pulse * 2.5) * 0.15, p.pos.z);
+    a.rotation.y = Math.atan2(S.beacon.target.x - p.pos.x, S.beacon.target.z - p.pos.z);
+  }
 }
 
 const MISSIONS = [

@@ -1,4 +1,4 @@
-// Solmar City — shared state (v3 rewrite).
+// Solmar City — shared state (v4 polish).
 // One mutable world object every system reads and writes. No network, no
 // imports from other game modules: this file stands alone.
 
@@ -68,7 +68,7 @@ export const S = {
   audio: null,
   debug: { longRewardToast: false, holdFlash: false, staged: null },
   saveLoaded: false,
-  version: 3,
+  version: 4,
 };
 
 export function starsFromHeat(heat) {

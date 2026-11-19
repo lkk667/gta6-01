@@ -1,8 +1,8 @@
-// Solmar City — bootstrap, game loop, menus, staging (v3 rewrite).
+// Solmar City — bootstrap, game loop, menus, staging (v4 polish).
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, WORLD, LANDMARKS, toast } from './state.js';
-import { buildCity, updateBlobShadows } from './city.js';
+import { buildCity, updateBlobShadows, updateTrafficLights } from './city.js';
 import { buildPlayer, updatePlayer, updateCamera } from './player.js';
 import { spawnParkedCar, nearestCar, enterCar, exitCar, updateDriving } from './vehicles.js';
 import { buildTraffic, updateTraffic, updatePeds } from './traffic.js';
@@ -20,13 +20,24 @@ let fPrev = false;
 let rPrev = false;
 
 function buildLights() {
-  const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x8a7a5a, 0.95);
+  // Dusk golden hour: warm low sun from the west, pink-orange sky light,
+  // long real shadows. Blob shadows (city.js) stay as contact anchors.
+  const hemi = new THREE.HemisphereLight(0xffb08a, 0x5a4038, 0.75);
   S.scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
-  sun.position.set(120, 180, 60);
+  const sun = new THREE.DirectionalLight(0xffb060, 2.1);
+  sun.position.set(-180, 62, 55);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -210;
+  sun.shadow.camera.right = 210;
+  sun.shadow.camera.top = 210;
+  sun.shadow.camera.bottom = -210;
+  sun.shadow.camera.near = 10;
+  sun.shadow.camera.far = 520;
+  sun.shadow.bias = -0.0006;
   S.scene.add(sun);
-  // No shadow maps: contact is shown with blob shadows (city.js), which
-  // render identically on every machine including headless SwiftShader.
+  S.scene.add(sun.target);
+  S.sun = sun;
 }
 
 function buildParkedCars() {
@@ -38,6 +49,9 @@ function buildParkedCars() {
     [-122, 78, Math.PI / 2, 0xd8b83a], [38, 122, 0, 0x3a7ad8],
   ];
   for (const [x, z, h, c] of spots) spawnParkedCar(x, z, h, c);
+  // A taxi by the plaza and a delivery truck by the harbor, for variety.
+  spawnParkedCar(8, -38, Math.PI / 2, 0xe8c832, 'taxi');
+  spawnParkedCar(-8, 122, 0, 0xb8bcc2, 'truck');
 }
 
 function wireMenu() {
@@ -119,6 +133,7 @@ function loop() {
     updateTraffic(dt);
     updatePeds(dt);
     updatePolice(dt);
+    updateTrafficLights();
     updateMissions(dt);
     updateCombat(dt);
     updateBeacon(dt);
@@ -174,14 +189,14 @@ export function stageChase() {
   }
   S.heat = 65; // 4 stars
   S.objectiveText = 'Bring the car to the Hideout garage';
-  // Three cruisers pacing the car in formation: ahead on both sides and one
-  // flanking level with the car. Every slot stays ahead of the chase camera
-  // (9.5 m behind the car), so all three read in the frame at once.
+  // Three cruisers pacing the car in formation: two ahead-flanking and one
+  // level on the left, all clearly ahead of the chase camera so none of
+  // them stacks on top of the player's car in the frame.
   S.debug.pacing = true;
   const spots = [
-    [-6.5, 48, 26, { side: -6.5, fwd: 8 }],
-    [6.5, 48, 26, { side: 6.5, fwd: 8 }],
-    [7, 39, 26, { side: 7, fwd: -1 }],
+    [-7.5, 50, 26, { side: -7.5, fwd: 10 }],
+    [7.5, 50, 26, { side: 7.5, fwd: 10 }],
+    [-7.5, 38, 26, { side: -7.5, fwd: 0 }],
   ];
   for (const [x, z, sp, pace] of spots) {
     const c = spawnCruiser(x, z);
@@ -203,7 +218,13 @@ export function stageCity() {
   p.heading = Math.PI; // facing north (-z), away from the camera, at the cruiser
   S.camYaw = 0; // camera south of the player, looking north: cruiser ahead in view
   S.camPitch = 0.3;
-  S.heat = 42; // 3 stars
+  S.camDist = 8.5; // closer to the ground: the shootout fills the frame
+  S.heat = 55; // 3 stars, holds through the heat decay of the wait
+  S.debug.noSpawn = true; // no extra cruisers spawning onto the camera
+  S.debug.freezePolice = true; // the staged cruiser holds its pose instead
+  // of driving onto the player and tripping the BUSTED timer mid-shot
+  S.debug.freezeTraffic = true; // traffic holds still so no car drives
+  // through the frame and parks on the camera during the 6 s wait
   S.objectiveText = 'Lose the cops — get your wanted level to zero';
   // A cruiser ahead with an officer standing beside it.
   const cruiser = spawnCruiser(0, -16);
@@ -211,8 +232,30 @@ export function stageCity() {
   cruiser.heading = 0;
   cruiser.speed = 0;
   makeOfficer(2.6, -13.5, Math.PI * 0.85);
+  // Keep the frame clear of stray traffic right by the player.
+  for (const t of S.trafficCars) {
+    if (Math.abs(t.mesh.position.x) < 12 && Math.abs(t.mesh.position.z) < 12) {
+      t.mesh.position.x = 120;
+      t.mesh.position.z = -120;
+    }
+  }
+  // Street life in frame: two pedestrians crossing ahead, one fleeing the shot.
+  stagePeds([[3.5, -8, 0.4], [-4, -6, -0.5], [-1.5, -22, 2.8]]);
   // One shot, flash held open for the camera.
   fireAndHold();
+}
+
+// Move the first few pedestrians to fixed spots (x, z, heading) so a staged
+// shot has street life in frame instead of an empty street.
+function stagePeds(spots) {
+  spots.forEach(([x, z, h], i) => {
+    const ped = S.peds[i];
+    if (!ped) return;
+    ped.mesh.position.set(x, 0, z);
+    ped.heading = h;
+    ped.fleeTimer = 0;
+    ped.retarget = 5;
+  });
 }
 
 export function stageMission() {
@@ -224,10 +267,25 @@ export function stageMission() {
   p.pos.x = LANDMARKS.marinaPark.x;
   p.pos.z = LANDMARKS.marinaPark.z + 12;
   p.group.position.set(p.pos.x, 0, p.pos.z);
-  p.heading = Math.PI;
-  S.camYaw = 0;
-  S.camPitch = 0.3;
+  // Face Solmar Tower down a clear sightline: stand on road z=-80 looking
+  // east. The tower's south face is 20 m north of that road, and no nearer
+  // tower stands in the same column (looking north from road x=80, the
+  // (100,-60) tower sits directly in front of it and hides it).
+  p.pos.x = -40;
+  p.pos.z = -80;
+  p.group.position.set(-40, 0, -80);
+  p.heading = Math.PI / 2; // facing east, down road z=-80 toward the tower
+  S.camYaw = -Math.PI / 2;
+  S.camPitch = -0.15; // camera low, looking up: the 130 m tower fills the frame
+  S.camDist = 8.5;
+  stagePeds([[-20, -82, 1.2], [-10, -78, -1.0]]);
   debugCompleteMission1();
+  // debugCompleteMission1 teleports the player to the park; put them back
+  // on the road with the tower in view.
+  p.pos.x = -40;
+  p.pos.z = -80;
+  p.group.position.set(-40, 0, -80);
+  p.heading = Math.PI / 2;
   // The completion banner stands alone; the objective line reports the
   // payout instead of the stale "pick up" instruction at 0 m.
   S.objectiveText = 'Mission 1 complete — $300 earned';
@@ -238,17 +296,23 @@ export function stageFoot() {
   autostartGame();
   S.debug.staged = 'foot';
   const p = S.player;
-  // On road z=-40, facing Cafe Luna's storefront 11 m north. (Standing
-  // closer, at z=-14, puts the player inside the block tower's collider
-  // at (-60,-20) and the collision push shoves them back down the road.)
+  // On road z=-40, facing Cafe Luna. Framing math: the rooftop sign tops
+  // out at y≈17, so the camera must sit low and look UP — camPitch is
+  // negative here (pitch raises the camera and looks down, which hides the
+  // sign; v4's first attempt used +0.24 and lost the sign completely).
+  // camDist 14 + pitch -0.1 puts the sign top just inside the frame.
   p.pos.x = -60;
   p.pos.z = -40;
   p.group.position.set(-60, 0, -40);
   p.heading = Math.PI; // facing north, walking toward Cafe Luna
   S.camYaw = 0; // camera south of the player, looking north at the sign
-  S.camPitch = -0.05; // near-level, tilted slightly up so the rooftop sign stays in frame
-  S.camDist = 13; // pulled back so the sign + storefront both fit
+  S.camPitch = -0.1;
+  S.camDist = 14;
   S.objectiveText = 'Pick up the package at the Hideout';
+  // Cafe street life: a couple at the outdoor tables, one on the sidewalk.
+  stagePeds([[-54, -47, -2.2], [-66, -47, 2.2], [-57, -43, 0.6], [-64, -52, 0.2]]);
+  // A taxi waiting at the kerb in the left foreground, for depth.
+  spawnParkedCar(-72, -38, Math.PI / 2, 0xe8c832, 'taxi');
 }
 
 export function fireAndHold() {
@@ -256,7 +320,7 @@ export function fireAndHold() {
   S.debug.holdFlash = true;
   if (S.player) {
     S.player.flashMat.opacity = 0.95;
-    S.player.flashLight.intensity = 26;
+    S.player.flashLight.intensity = 10;
   }
 }
 
@@ -271,9 +335,15 @@ function init() {
   S.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   S.renderer.setSize(window.innerWidth, window.innerHeight);
   S.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  S.renderer.shadowMap.enabled = true;
+  S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  S.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  S.renderer.toneMappingExposure = 1.12;
   S.scene = new THREE.Scene();
-  S.scene.background = new THREE.Color(0x87bfe8);
-  S.scene.fog = new THREE.Fog(0x87bfe8, 220, 520);
+  // Dusk sky + haze. The sky dome (city.js) paints the gradient; the fog
+  // colour matches the horizon so distant towers melt into the sunset.
+  S.scene.background = new THREE.Color(0xe8906a);
+  S.scene.fog = new THREE.Fog(0xdd8a66, 150, 480);
   S.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
   S.camera.position.set(0, 6, 12);
   S.clock = new THREE.Clock();

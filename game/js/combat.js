@@ -1,4 +1,4 @@
-// Solmar City — combat: pistol, punch, pickups (v3 rewrite).
+// Solmar City — combat: pistol, punch, pickups (v4 polish).
 // The muzzle flash lives on the gun mesh itself (player.js), so the flash
 // can never sit apart from the barrel the way a camera-relative flash did.
 
@@ -10,7 +10,38 @@ import { scarePeds } from './traffic.js';
 let tracer = null;
 let tracerTimer = 0;
 let shakeTimer = 0;
+let smokeHoldTimer = 0;
 const particles = [];
+const smokePuffs = [];
+let smokeTex = null;
+
+function getSmokeTex() {
+  if (smokeTex) return smokeTex;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+  grad.addColorStop(0, 'rgba(200,200,200,0.55)');
+  grad.addColorStop(0.6, 'rgba(180,180,180,0.25)');
+  grad.addColorStop(1, 'rgba(180,180,180,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  smokeTex = new THREE.CanvasTexture(c);
+  return smokeTex;
+}
+
+function spawnSmoke(pos) {
+  for (let i = 0; i < 2; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: getSmokeTex(), transparent: true, depthWrite: false, opacity: 0.6 }));
+    sp.position.copy(pos);
+    sp.position.x += (Math.random() - 0.5) * 0.3;
+    sp.position.y += (Math.random() - 0.5) * 0.2;
+    sp.scale.set(0.7, 0.7, 1);
+    S.scene.add(sp);
+    smokePuffs.push({ sprite: sp, life: 0.7, max: 0.7, vy: 0.9 + Math.random() * 0.5 });
+  }
+}
 
 export function buildCombat() {
   // One reusable tracer line, hidden until a shot is fired.
@@ -66,11 +97,14 @@ export function shoot() {
   p.flashTimer = 0.09;
   if (S.debug.holdFlash) {
     p.flashMat.opacity = 0.95;
-    p.flashLight.intensity = 26;
+    p.flashLight.intensity = 10;
   }
   shakeTimer = 0.12;
   addHeat(6);
   const from = muzzleWorldPos(new THREE.Vector3());
+  // A little grey smoke at the muzzle that drifts up and fades — the flash
+  // is a star at the barrel, the smoke is the only thing that lingers.
+  spawnSmoke(from);
   const dir = aimDirection();
   // Raycast against cars, cruisers, peds and buildings.
   const ray = new THREE.Raycaster(from, dir);
@@ -164,6 +198,29 @@ export function updateCombat(dt) {
     pt.mesh.position.y += pt.vy * dt;
     pt.mesh.position.z += pt.vz * dt;
     pt.vy -= 9 * dt;
+  }
+  // Smoke puffs rise, grow and fade out.
+  for (let i = smokePuffs.length - 1; i >= 0; i--) {
+    const sm = smokePuffs[i];
+    sm.life -= dt;
+    if (sm.life <= 0) {
+      S.scene.remove(sm.sprite);
+      smokePuffs.splice(i, 1);
+      continue;
+    }
+    sm.sprite.position.y += sm.vy * dt;
+    const grow = 1 + (1 - sm.life / sm.max) * 1.6;
+    sm.sprite.scale.set(0.7 * grow, 0.7 * grow, 1);
+    sm.sprite.material.opacity = 0.6 * (sm.life / sm.max);
+  }
+  // Staged shot: while the flash is held open, keep a wisp of smoke
+  // curling off the muzzle so the shot reads as a fresh gunshot.
+  if (S.debug.holdFlash && S.player) {
+    smokeHoldTimer -= dt;
+    if (smokeHoldTimer <= 0) {
+      smokeHoldTimer = 0.35;
+      spawnSmoke(muzzleWorldPos(new THREE.Vector3()));
+    }
   }
   // Pickups: spin, bob, collect on touch.
   const p = S.player;

@@ -1,4 +1,4 @@
-// Solmar City — wanted level, police cruisers, BUSTED (v3 rewrite).
+// Solmar City — wanted level, police cruisers, BUSTED (v4 polish).
 // Cruisers are faster than the player now (32 + 1.5/star vs the player's 34),
 // so a chase stays a chase; their light bars flash red/blue with glow halos.
 
@@ -46,7 +46,7 @@ export function updatePolice(dt) {
   }
   spawnTimer -= dt;
   const want = stars === 0 ? 0 : Math.min(stars + 1, 5);
-  if (stars > 0 && S.cruisers.length < want && spawnTimer <= 0 && !S.debug.pacing) {
+  if (stars > 0 && S.cruisers.length < want && spawnTimer <= 0 && !S.debug.pacing && !S.debug.noSpawn) {
     spawnTimer = 1.2;
     const px = S.player.pos.x;
     const pz = S.player.pos.z;
@@ -65,6 +65,24 @@ export function updatePolice(dt) {
     const d = dist2(mx, mz, px, pz);
     let wantHeading;
     let target = topSpeed;
+    if (S.debug.freezePolice) {
+      // Staged shot: the cruiser holds its pose (lights still flash below).
+      c.mesh.rotation.y = c.heading;
+      c.flashPhase += dt * 7;
+      const redOn = Math.sin(c.flashPhase) > 0;
+      const ud0 = c.mesh.userData;
+      if (ud0.redLens) {
+        ud0.redLens.material.color.setHex(redOn ? 0xff2a2a : 0x5a1414);
+        ud0.blueLens.material.color.setHex(redOn ? 0x142a5a : 0x2a6aff);
+        ud0.redGlow.material.opacity = redOn ? 0.95 : 0.12;
+        ud0.blueGlow.material.opacity = redOn ? 0.12 : 0.95;
+        if (ud0.redGround) {
+          ud0.redGround.material.opacity = redOn ? 0.55 : 0.08;
+          ud0.blueGround.material.opacity = redOn ? 0.08 : 0.55;
+        }
+      }
+      continue;
+    }
     if (S.debug.pacing && c.pace && S.currentCar) {
       // Formation pacing (staged chase shot): hold a fixed slot beside the
       // player's car and match its speed instead of converging and ramming.
@@ -109,7 +127,8 @@ export function updatePolice(dt) {
         }
       }
     }
-    // Flashing light bar: alternate red / blue, glow sprites pulse with it.
+    // Flashing light bar: alternate red / blue, glow sprites pulse with it,
+    // and the red/blue ground reflections under the cruiser pulse too.
     c.flashPhase += dt * 7;
     const redOn = Math.sin(c.flashPhase) > 0;
     const ud = c.mesh.userData;
@@ -118,6 +137,10 @@ export function updatePolice(dt) {
       ud.blueLens.material.color.setHex(redOn ? 0x142a5a : 0x2a6aff);
       ud.redGlow.material.opacity = redOn ? 0.95 : 0.12;
       ud.blueGlow.material.opacity = redOn ? 0.12 : 0.95;
+      if (ud.redGround) {
+        ud.redGround.material.opacity = redOn ? 0.55 : 0.08;
+        ud.blueGround.material.opacity = redOn ? 0.08 : 0.55;
+      }
     }
     if (S.audio && d < 60) S.audio.siren(d);
   }
@@ -176,12 +199,27 @@ export function makeOfficer(x, z, heading) {
   const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.27, 0.1, 10), navy);
   cap.position.y = 1.9;
   g.add(cap);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.72, 0.22), navy);
-  legL.position.set(-0.15, 0.36, 0);
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.26), navy);
+  brim.position.set(0, 1.86, 0.28);
+  g.add(brim);
+  const legGeo = new THREE.BoxGeometry(0.2, 0.72, 0.22);
+  legGeo.translate(0, -0.36, 0);
+  const legL = new THREE.Mesh(legGeo, navy);
+  legL.position.set(-0.15, 0.72, 0);
   g.add(legL);
   const legR = legL.clone();
   legR.position.x = 0.15;
   g.add(legR);
+  // Arms at the sides, one hand resting on the holster.
+  const armGeo = new THREE.BoxGeometry(0.16, 0.6, 0.18);
+  armGeo.translate(0, -0.3, 0);
+  const armL = new THREE.Mesh(armGeo, navy);
+  armL.position.set(-0.39, 1.4, 0);
+  g.add(armL);
+  const armR = armL.clone();
+  armR.position.x = 0.39;
+  armR.rotation.x = -0.5;
+  g.add(armR);
   // Badge: small gold square on the chest.
   const badge = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0xffd94a }));
   badge.position.set(-0.14, 1.25, 0.17);

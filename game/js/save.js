@@ -1,14 +1,14 @@
-// Solmar City — localStorage autosave (v3 rewrite).
+// Solmar City — localStorage autosave (v4 polish).
 
 import { S } from './state.js';
 
-const KEY = 'solmar-city-save-v3';
+const KEY = 'solmar-city-save-v4';
 
 export function saveGame() {
   try {
     const p = S.player;
     const data = {
-      version: 3,
+      version: 4,
       cash: S.cash,
       health: S.health,
       magazine: S.magazine,
@@ -33,7 +33,7 @@ export function loadSave() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || data.version !== 3) return null;
+    if (!data || data.version !== 4) return null;
     return data;
   } catch (e) {
     return null;

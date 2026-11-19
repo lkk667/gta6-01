@@ -1,4 +1,4 @@
-// Solmar City — on-foot character and third-person camera (v3 rewrite).
+// Solmar City — on-foot character and third-person camera (v4 polish).
 // Over-shoulder framing: the camera and its look target are both shifted
 // sideways so the character sits left of centre and the crosshair clears
 // the head, aiming past the right shoulder into open view.
@@ -19,9 +19,11 @@ export function buildPlayer() {
 
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.34), shirt);
   torso.position.y = 1.12;
+  torso.castShadow = true;
   group.add(torso);
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), skin);
   head.position.y = 1.72;
+  head.castShadow = true;
   group.add(head);
   const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.28, 0.1, 12), new THREE.MeshLambertMaterial({ color: 0xe84a4a }));
   cap.position.y = 1.92;
@@ -30,24 +32,33 @@ export function buildPlayer() {
   brim.position.set(0, 1.88, 0.3);
   group.add(brim);
 
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.78, 0.24), pants);
-  legL.position.set(-0.17, 0.39, 0);
+  // Limbs pivot at the hip/shoulder (geometry translated so rotation.x
+  // swings from the joint, not from the middle of the limb).
+  const legGeo = new THREE.BoxGeometry(0.22, 0.78, 0.24);
+  legGeo.translate(0, -0.39, 0);
+  const legL = new THREE.Mesh(legGeo, pants);
+  legL.position.set(-0.17, 0.78, 0);
+  legL.castShadow = true;
   group.add(legL);
   const legR = legL.clone();
   legR.position.x = 0.17;
   group.add(legR);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.66, 0.2), shirt);
-  armL.position.set(-0.42, 1.14, 0);
+  const armGeo = new THREE.BoxGeometry(0.18, 0.66, 0.2);
+  armGeo.translate(0, -0.33, 0);
+  const armL = new THREE.Mesh(armGeo, shirt);
+  armL.position.set(-0.42, 1.45, 0);
   group.add(armL);
   const armR = armL.clone();
   armR.position.x = 0.42;
   group.add(armR);
-  const footL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.34), shoes);
-  footL.position.set(-0.17, 0.05, 0.05);
-  group.add(footL);
-  const footR = footL.clone();
-  footR.position.x = 0.17;
-  group.add(footR);
+  // Shoes ride on the legs so they swing with the walk.
+  const footGeo = new THREE.BoxGeometry(0.22, 0.1, 0.34);
+  const footL = new THREE.Mesh(footGeo, shoes);
+  footL.position.set(0, -0.73, 0.05);
+  legL.add(footL);
+  const footR = new THREE.Mesh(footGeo, shoes);
+  footR.position.set(0, -0.73, 0.05);
+  legR.add(footR);
 
   // Pistol in the right hand, held forward. The muzzle flash is a child of
   // this gun mesh, so flash and gun can never drift apart on screen.
@@ -62,16 +73,43 @@ export function buildPlayer() {
   gun.position.set(0.42, 1.05, 0.3);
   group.add(gun);
 
-  // Muzzle flash: starburst cone + halo, bound to the gun barrel tip.
-  const flashMat = new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0 });
-  const flashCone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.85, 6), flashMat);
-  flashCone.rotation.x = Math.PI / 2;
-  flashCone.position.z = 0.75;
-  gun.add(flashCone);
-  const flashHalo = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), flashMat);
-  flashHalo.position.z = 0.55;
-  gun.add(flashHalo);
-  const flashLight = new THREE.PointLight(0xffc832, 0, 9);
+  // Muzzle flash: a 4-point star (two crossed double-sided planes) bound
+  // to the gun barrel tip — never a yellow ball, never a ground puddle.
+  // The light is small and short-range on purpose: it lights the gun, not
+  // the whole street.
+  const starTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = 128;
+    c.height = 128;
+    const g = c.getContext('2d');
+    g.translate(64, 64);
+    g.fillStyle = '#fff2b8';
+    g.shadowColor = '#ff9a2a';
+    g.shadowBlur = 16;
+    g.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const r = i % 2 === 0 ? 60 : 12;
+      const x = Math.cos(a) * r, y = Math.sin(a) * r;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fill();
+    g.beginPath();
+    g.arc(0, 0, 12, 0, Math.PI * 2);
+    g.fillStyle = '#ffffff';
+    g.fill();
+    return new THREE.CanvasTexture(c);
+  })();
+  const flashMat = new THREE.MeshBasicMaterial({ map: starTex, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+  const flashA = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7), flashMat);
+  flashA.position.z = 0.72;
+  gun.add(flashA);
+  const flashB = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7), flashMat);
+  flashB.position.z = 0.72;
+  flashB.rotation.z = Math.PI / 4;
+  gun.add(flashB);
+  const flashLight = new THREE.PointLight(0xffc832, 0, 5);
   flashLight.position.z = 0.7;
   gun.add(flashLight);
 
@@ -150,7 +188,7 @@ export function updatePlayer(dt) {
       p.flashTimer -= dt;
       const on = p.flashTimer > 0;
       p.flashMat.opacity = on ? 0.95 : 0;
-      p.flashLight.intensity = on ? 26 : 0;
+      p.flashLight.intensity = on ? 10 : 0;
     } else {
       p.flashMat.opacity = 0;
       p.flashLight.intensity = 0;

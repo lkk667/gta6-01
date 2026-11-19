@@ -4,7 +4,7 @@
 
 # Solmar City
 
-An original open-world crime game built for the [Make GTA 6 bounty](https://make.fun/bounty/gta6-01) on make.fun. A sun-soaked coastal city to explore on foot and by car: steal cars, outrun the Solmar PD, run five story missions, and build your cash — all in the browser, from static files, with no network request.
+An original open-world crime game built for the [Make GTA 6 bounty](https://make.fun/bounty/gta6-01) on make.fun. A golden-hour coastal city to explore on foot and by car: steal cars, outrun the Solmar PD, run five story missions, and build your cash — all in the browser, from static files, with no network request.
 
 ## The game
 
