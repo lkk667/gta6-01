@@ -1,55 +1,62 @@
-// Solmar City — shared world state.
-// One plain object every system reads and writes. It holds the run, the
-// player's stats, the mission progress, the live handles, and the UI
-// queues. It imports nothing from the other game modules, so nothing can
-// tangle: every other file imports from here, never the reverse.
+// Solmar City — the shared world.
+// One plain object that every system reads and writes: the run, the
+// player numbers, the mission progress, the live Three.js handles and the
+// UI queues. It depends on no other game module, so the dependency arrow
+// always points inward: the rest of the game imports from here.
 
+function makeLandmark(x, z, label) {
+  return { x, z, label };
+} // end of makeLandmark()
+
+// City geometry and driving numbers.
 export const WORLD = {
-  size: 380,
-  half: 190,
-  roadGap: 40,
+  size: 380, half: 190, roadGap: 40,
   roads: [-160, -120, -80, -40, 0, 40, 80, 120, 160],
-  playerTopSpeed: 34, // metres per second on the road
-  cruiserBaseSpeed: 32, // cruisers keep pace with the player and can catch them
+  // Top road speed in metres per second.
+  playerTopSpeed: 34,
+  // Cruisers can keep up with the player and catch them.
+  cruiserBaseSpeed: 32,
   cruiserPerStar: 1.5,
 };
 
+// Named places the missions and the minimap refer to.
 export const LANDMARKS = {
-  hideout: { x: -120, z: 120, label: 'the Hideout' },
-  marinaPark: { x: 40, z: 40, label: 'Marina Park' },
-  cafeLuna: { x: -40, z: -40, label: 'Cafe Luna' },
-  solmarTower: { x: 80, z: -120, label: 'Solmar Tower' },
-  harbor: { x: 0, z: 168, label: 'Solmar Harbor' },
-  hospital: { x: 120, z: -40, label: 'Solmar General' },
-  plaza: { x: 0, z: 0, label: 'Marina Plaza' },
+  hideout: makeLandmark(-120, 120, 'the Hideout'),
+  marinaPark: makeLandmark(40, 40, 'Marina Park'),
+  cafeLuna: makeLandmark(-40, -40, 'Cafe Luna'),
+  solmarTower: makeLandmark(80, -120, 'Solmar Tower'),
+  harbor: makeLandmark(0, 168, 'Solmar Harbor'),
+  hospital: makeLandmark(120, -40, 'Solmar General'),
+  plaza: makeLandmark(0, 0, 'Marina Plaza'),
+};
+
+const DEBUG_FLAGS = {
+  longRewardToast: false,
+  holdFlash: false,
+  staged: null,
+  holdReward: false,
+  freezeTraffic: false,
+  freezePolice: false,
+  noSpawn: false,
+  pacing: false,
 };
 
 export const S = {
-  // Run.
-  mode: 'menu', // 'menu' | 'playing' | 'busted'
-  time: 0,
-  version: 4,
-  saveLoaded: false,
-  freeRoam: false,
-  // Player stats.
-  cash: 0,
-  health: 100,
-  maxHealth: 100,
-  magazine: 12,
-  magSize: 12,
-  reserve: 60,
-  heat: 0, // 0..100, maps onto 0..5 wanted stars
-  // Missions.
-  missionsCompleted: 0,
-  missionIndex: 0,
-  missionStage: 0, // sub-stage inside the current mission
+  // Run state. mode is 'menu', 'playing' or 'busted'.
+  mode: 'menu', time: 0, version: 4, saveLoaded: false, freeRoam: false,
+  // Player numbers.
+  cash: 0, health: 100, maxHealth: 100, magazine: 12, magSize: 12, reserve: 60,
+  // Wanted heat, 0..100, driving 0..5 stars.
+  heat: 0,
+  // Campaign progress.
+  missionsCompleted: 0, missionIndex: 0,
+  // Sub-stage inside the current job.
+  missionStage: 0,
   objectiveText: '',
-  objectiveDist: null, // metres to the target, null hides the distance
-  // Movement and arrest.
-  onFoot: true,
-  speedKmh: 0,
-  bustTimer: 0,
-  bustedAt: null,
+  // Metres to the target; null hides the distance pill.
+  objectiveDist: null,
+  // On foot vs driving, and the arrest clock.
+  onFoot: true, speedKmh: 0, bustTimer: 0, bustedAt: null,
   // Three.js handles, filled in by main.js and the builders.
   scene: null,
   camera: null,
@@ -57,18 +64,29 @@ export const S = {
   clock: null,
   sun: null,
   clouds: [],
-  player: null, // { group, torso, head, legL, legR, armL, armR, gun, flashMat, flashLight, pos, heading, speed, walkPhase, weapon, punchTimer, flashTimer }
-  currentCar: null, // the car the player is driving, or null on foot
-  cars: [], // parked + stolen drivable cars (vehicles.js)
-  trafficCars: [], // the 28 moving traffic cars (traffic.js)
-  peds: [], // the 40 pedestrians (traffic.js)
+  // The player rig: group, torso, head, legL, legR, armL, armR, gun,
+  // flashMat, flashLight, pos, heading, speed, walkPhase, weapon,
+  // punchTimer, flashTimer.
+  player: null,
+  // The car being driven, or null while on foot.
+  currentCar: null,
+  // Parked and stolen drivable cars (vehicles.js).
+  cars: [],
+  // The 28 moving traffic cars (traffic.js).
+  trafficCars: [],
+  // The 40 pedestrians (traffic.js).
+  peds: [],
   cruisers: [],
   pickups: [],
-  colliders: [], // { x, z, r } circles the player and cars must not enter
-  benches: [], // { x, z } seats a pedestrian can sit on (city.js fills this)
-  trafficLights: null, // [{ x, z, red, yellow, green }] (city.js fills this)
-  beacon: null, // { group, ring, ... } the gold mission marker (missions.js)
-  // UI and input.
+  // Circles { x, z, r } the player and cars must not enter.
+  colliders: [],
+  // Seats { x, z } a pedestrian can sit on (city.js fills this).
+  benches: [],
+  // Traffic lights [{ x, z, red, yellow, green }] (city.js fills this).
+  trafficLights: null,
+  // The gold mission marker { group, ring, ... } (missions.js).
+  beacon: null,
+  // UI and input queues.
   toasts: [],
   toastSeq: 0,
   keys: {},
@@ -81,71 +99,68 @@ export const S = {
   dragOrbit: false,
   muted: false,
   audio: null,
-  debug: { longRewardToast: false, holdFlash: false, staged: null, holdReward: false, freezeTraffic: false, freezePolice: false, noSpawn: false, pacing: false },
+  debug: DEBUG_FLAGS,
 };
 
-// Wanted stars from heat: 0 below 1, then a star at each cut.
+// Wanted stars from heat: none below 1, then one more at each cut.
 const STAR_CUTS = [20, 40, 60, 85];
 
-export function starsFromHeat(heat) {
-  if (heat <= 0) return 0;
-  let stars = 1;
-  for (const cut of STAR_CUTS) {
-    if (heat >= cut) stars++;
-    else break;
+export function starsFromHeat(heatValue) {
+  if (heatValue <= 0) return 0;
+  let count = 1;
+  for (let i = 0; i < STAR_CUTS.length; i++) {
+    if (heatValue < STAR_CUTS[i]) break;
+    count += 1;
   }
-  return stars;
+  return count;
 }
 
-// Heat stays inside 0..100 no matter how much is added or removed.
-export function addHeat(amount) {
-  S.heat = Math.max(0, Math.min(100, S.heat + amount));
-}
+// Clamp heat into 0..100 however much is added or removed.
+export function addHeat(delta) {
+  S.heat = clamp(S.heat + delta, 0, 100);
+} // end of addHeat()
 
 export function clearToasts() {
   S.toasts.length = 0;
-}
+} // end of clearToasts()
 
-// A banner on the HUD. `life` seconds, default 5. Past four, the oldest drops.
-export function toast(text, sub, life) {
+// Show a HUD banner for `seconds` (5 by default). Past four banners
+// the oldest one drops off.
+export function toast(title, detail, seconds) {
   const entry = {
     id: ++S.toastSeq,
-    text,
-    sub: sub || '',
-    until: S.time + (life === undefined ? 5 : life),
+    text: title,
+    sub: detail || '',
+    until: S.time + (seconds === undefined ? 5 : seconds),
   };
   S.toasts.push(entry);
   while (S.toasts.length > 4) S.toasts.shift();
   return entry;
-}
+} // end of toast()
 
-// Deterministic PRNG: the same seed paints the same city on every run.
-export function mulberry32(seed) {
-  let state = seed >>> 0;
+// Seeded PRNG: one seed paints the same city on every run.
+export function mulberry32(seedValue) {
+  let seedState = seedValue >>> 0;
   return function () {
-    state |= 0;
-    state = (state + 0x6d2b79f5) | 0;
-    let mix = Math.imul(state ^ (state >>> 15), 1 | state);
-    mix = (mix + Math.imul(mix ^ (mix >>> 7), 61 | mix)) ^ mix;
-    return ((mix ^ (mix >>> 14)) >>> 0) / 4294967296;
+    seedState |= 0;
+    seedState = (seedState + 0x6d2b79f5) | 0;
+    let hashed = Math.imul(seedState ^ (seedState >>> 15), 1 | seedState);
+    hashed = (hashed + Math.imul(hashed ^ (hashed >>> 7), 61 | hashed)) ^ hashed;
+    return ((hashed ^ (hashed >>> 14)) >>> 0) / 4294967296;
   };
-}
+} // end of mulberry32()
 
-export function clamp(v, lo, hi) {
-  if (v < lo) return lo;
-  if (v > hi) return hi;
-  return v;
-}
+export function clamp(value, low, high) {
+  return value < low ? low : value > high ? high : value;
+} // end of clamp()
 
-// Straight-line distance on the ground plane. (Named dist2 for history;
-// it returns real metres, not a squared distance.)
-export function dist2(ax, az, bx, bz) {
-  const dx = ax - bx;
-  const dz = az - bz;
-  return Math.hypot(dx, dz);
-}
+// Ground-plane distance in real metres. (The old name says dist2, but the
+// value is a plain distance, not a squared one.)
+export function dist2(fromX, fromZ, toX, toZ) {
+  return Math.hypot(fromX - toX, fromZ - toZ);
+} // end of dist2()
 
-// Nearest road coordinate to a value. Roads run every 40 units.
-export function nearestRoad(v) {
-  return Math.round(v / WORLD.roadGap) * WORLD.roadGap;
-}
+// Snap a coordinate to the nearest road line; roads repeat every 40 units.
+export function nearestRoad(coord) {
+  return Math.round(coord / WORLD.roadGap) * WORLD.roadGap;
+} // end of nearestRoad()

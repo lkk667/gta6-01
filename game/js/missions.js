@@ -1,14 +1,14 @@
 // Solmar City — the story campaign.
-// Five jobs, then free roam. First comes Sunrise Delivery: fetch a package
-// from the Hideout and carry it to Marina Park ($300). Then Borrowed
-// Wheels: steal a car and bring it to the Hideout garage ($400). Then Cool
-// Down: shake the cops until the wanted level is zero ($500). Then Five
-// Drops: pick up five drops scattered over the city ($600). Last, Harbor
-// Run: reach the harbor pier ($800). A gold beacon marks the current
-// target, and a gold chevron floats above the player pointing at it
-// (hidden while driving). A job pays exactly once — a finishing flag plus
-// a done stage keep the payout from firing every frame — and the next job
-// starts a second and a half later.
+// Five jobs, then free roam. First comes Sunrise Delivery: fetch a
+// package from the Hideout and carry it to Marina Park ($300). Then
+// Borrowed Wheels: steal a car and bring it to the Hideout garage
+// ($400). Then Cool Down: shake the cops until the wanted level is zero
+// ($500). Then Five Drops: pick up five drops scattered over the city
+// ($600). Last, Harbor Run: reach the harbor pier ($800). A gold beacon
+// marks the current target, and a gold chevron floats above the player
+// pointing at it (hidden while driving). A job pays exactly once — a
+// finishing flag plus a done stage keep the payout from firing every
+// frame — and the next job starts a second and a half later.
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, LANDMARKS, toast, clearToasts, dist2 } from './state.js';
@@ -31,27 +31,38 @@ const DROP_POINTS = [
   { x: -40, z: 160 },
 ];
 
-let finishing = false;
-let beaconGoal = null;
-let navArrow = null;
-let dropList = [];
-let dropsTaken = 0;
-let missionClock = 0;
+let payingOut = false;
+let beaconTarget = null;
+let guideArrow = null;
+let drops = [];
+let takenCount = 0;
+let jobTimer = 0;
 
-function buildBeacon() {
+function ensureBeacon() {
   if (S.beacon) return;
   const group = new THREE.Group();
   // A tall see-through gold column, so the target reads from across town.
   const column = new THREE.Mesh(
     new THREE.CylinderGeometry(1.2, 1.2, 60, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xffd94a, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false })
+    new THREE.MeshBasicMaterial({
+      color: 0xffd94a,
+      transparent: true,
+      opacity: 0.22,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
   );
   column.position.y = 30;
   group.add(column);
   // A pulsing ring on the ground marking the exact spot.
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(2.2, 3.0, 24),
-    new THREE.MeshBasicMaterial({ color: 0xffd94a, transparent: true, opacity: 0.8, side: THREE.DoubleSide })
+    new THREE.MeshBasicMaterial({
+      color: 0xffd94a,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+    })
   );
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 0.15;
@@ -63,37 +74,37 @@ function buildBeacon() {
   // the target. Hidden while driving (from the low chase camera it loomed
   // like a paper plane) and hidden when there is no target. Scaled to
   // about half size so it reads as a quest marker, not a billboard.
-  navArrow = new THREE.Mesh(
+  guideArrow = new THREE.Mesh(
     new THREE.ConeGeometry(0.55, 1.4, 4),
     new THREE.MeshBasicMaterial({ color: 0xffd94a })
   );
-  navArrow.rotation.x = Math.PI / 2; // point forward, not up
-  navArrow.scale.set(0.55, 0.55, 0.55);
-  navArrow.visible = false;
-  S.scene.add(navArrow);
-}
+  guideArrow.rotation.x = Math.PI / 2; // point forward, not up
+  guideArrow.scale.set(0.55, 0.55, 0.55);
+  guideArrow.visible = false;
+  S.scene.add(guideArrow);
+} // end of ensureBeacon()
 
-function moveBeacon(x, z) {
-  buildBeacon();
-  beaconGoal = { x, z };
+function placeBeacon(x, z) {
+  ensureBeacon();
+  beaconTarget = { x, z };
   S.beacon.position.set(x, 0, z);
   S.beacon.visible = true;
-}
+} // end of placeBeacon()
 
-function concealBeacon() {
-  beaconGoal = null;
+function hideBeacon() {
+  beaconTarget = null;
   if (S.beacon) S.beacon.visible = false;
-  if (navArrow) navArrow.visible = false;
-}
+  if (guideArrow) guideArrow.visible = false;
+} // end of hideBeacon()
 
-function removeDrops() {
-  for (const d of dropList) S.scene.remove(d.mesh);
-  dropList = [];
-  dropsTaken = 0;
-}
+function clearDrops() {
+  for (let i = 0; i < drops.length; i++) S.scene.remove(drops[i].mesh);
+  drops = [];
+  takenCount = 0;
+} // end of clearDrops()
 
-function layDrops() {
-  removeDrops();
+function spawnDrops() {
+  clearDrops();
   for (const spot of DROP_POINTS) {
     const mesh = new THREE.Mesh(
       new THREE.TorusGeometry(1.1, 0.22, 8, 20),
@@ -102,59 +113,68 @@ function layDrops() {
     mesh.rotation.x = Math.PI / 2;
     mesh.position.set(spot.x, 1.0, spot.z);
     S.scene.add(mesh);
-    dropList.push({ mesh, x: spot.x, z: spot.z, taken: false });
+    drops.push({ mesh, x: spot.x, z: spot.z, taken: false });
   }
 }
 
+function setupJob(idx) {
+  // Each job's opening objective and where its beacon (if any) goes.
+  const jobSetups = [
+    {
+      text: 'Pick up the package at the Hideout',
+      setup: () => placeBeacon(LANDMARKS.hideout.x, LANDMARKS.hideout.z),
+    },
+    {
+      text: 'Steal a car first',
+      setup: () => hideBeacon(),
+    },
+    {
+      text: 'Lose the cops — get your wanted level to zero',
+      setup: () => hideBeacon(),
+    },
+    {
+      text: 'Collect the drops (0/5)',
+      setup: () => { spawnDrops(); hideBeacon(); },
+    },
+    {
+      text: 'Reach the harbor',
+      setup: () => placeBeacon(LANDMARKS.harbor.x, LANDMARKS.harbor.z),
+    },
+  ];
+  const job = jobSetups[idx];
+  S.objectiveText = job.text;
+  S.objectiveDist = null;
+  job.setup();
+} // end of setupJob()
+
 export function startMission(idx) {
-  buildBeacon();
-  removeDrops();
+  ensureBeacon();
+  clearDrops();
   S.missionIndex = idx;
   S.missionStage = 0;
-  missionClock = 0;
+  jobTimer = 0;
   clearToasts();
   const m = QUESTS[idx];
   toast('Mission ' + (idx + 1) + ' — ' + m.name, 'Reward $' + m.reward);
-  if (idx === 0) {
-    S.objectiveText = 'Pick up the package at the Hideout';
-    S.objectiveDist = null;
-    moveBeacon(LANDMARKS.hideout.x, LANDMARKS.hideout.z);
-  } else if (idx === 1) {
-    S.objectiveText = 'Steal a car first';
-    S.objectiveDist = null;
-    concealBeacon();
-  } else if (idx === 2) {
-    S.objectiveText = 'Lose the cops — get your wanted level to zero';
-    S.objectiveDist = null;
-    concealBeacon();
-  } else if (idx === 3) {
-    S.objectiveText = 'Collect the drops (0/5)';
-    S.objectiveDist = null;
-    layDrops();
-    concealBeacon();
-  } else if (idx === 4) {
-    S.objectiveText = 'Reach the harbor';
-    S.objectiveDist = null;
-    moveBeacon(LANDMARKS.harbor.x, LANDMARKS.harbor.z);
-  }
-}
+  setupJob(idx);
+} // end of startMission()
 
-function completeMission() {
-  if (finishing) return;
-  finishing = true;
+function finishMission() {
+  if (payingOut) return;
+  payingOut = true;
   const idx = S.missionIndex;
-  const m = QUESTS[idx];
-  S.cash += m.reward;
+  const quest = QUESTS[idx];
+  S.cash += quest.reward;
   S.missionsCompleted += 1;
   // Mark the job done so the tick cannot pay it again while the next job
   // is queued.
   S.missionStage = 99;
   clearToasts();
   S.debug.longRewardToast = true;
-  toast('Mission complete +$' + m.reward, m.name + ' — $' + m.reward + ' earned');
+  toast('Mission complete +$' + quest.reward, quest.name + ' — $' + quest.reward + ' earned');
   if (S.audio) S.audio.jingle();
   setTimeout(() => {
-    finishing = false;
+    payingOut = false;
     // During a staged screenshot the next job must NOT start: it would
     // clear the reward toast and rewrite the objective mid-shot. The
     // functional test runs unstaged, so it still gets the auto-start.
@@ -165,15 +185,15 @@ function completeMission() {
       S.freeRoam = true;
       S.objectiveText = 'Free roam — all missions complete';
       S.objectiveDist = null;
-      concealBeacon();
+      hideBeacon();
       const replay = document.getElementById('btn-replay');
       if (replay) replay.style.display = 'inline-block';
     }
   }, 1500);
-}
+} // end of finishMission()
 
-// Debug path used by the harness and the mission screenshot: put the player
-// at the delivery point and pay mission 1 out.
+// Debug path used by the harness and the mission screenshot: put the
+// player at the delivery point and pay mission 1 out.
 export function debugCompleteMission1() {
   S.missionIndex = 0;
   S.missionStage = 1;
@@ -182,64 +202,69 @@ export function debugCompleteMission1() {
     S.player.pos.z = LANDMARKS.marinaPark.z;
     S.player.group.position.set(LANDMARKS.marinaPark.x, 0, LANDMARKS.marinaPark.z);
   }
-  completeMission();
+  finishMission();
 }
 
-function updateMission0(dt) {
+function tickMission0(dt) {
   const px = S.player.pos.x;
   const pz = S.player.pos.z;
-  if (S.missionStage === 0) {
-    // Stage 0: fetch the package at the Hideout.
-    S.objectiveDist = dist2(px, pz, LANDMARKS.hideout.x, LANDMARKS.hideout.z);
-    if (dist2(px, pz, LANDMARKS.hideout.x, LANDMARKS.hideout.z) < 4) {
-      S.missionStage = 1;
-      toast('Package collected', 'Deliver it to Marina Park');
-      S.objectiveText = 'Deliver the package to Marina Park';
-      moveBeacon(LANDMARKS.marinaPark.x, LANDMARKS.marinaPark.z);
-    }
-  } else if (S.missionStage === 1) {
+  const hx = LANDMARKS.hideout.x;
+  const hz = LANDMARKS.hideout.z;
+  const mx = LANDMARKS.marinaPark.x;
+  const mz = LANDMARKS.marinaPark.z;
+  if (S.missionStage === 1) {
     // Stage 1: deliver to Marina Park.
-    S.objectiveDist = dist2(px, pz, LANDMARKS.marinaPark.x, LANDMARKS.marinaPark.z);
-    if (dist2(px, pz, LANDMARKS.marinaPark.x, LANDMARKS.marinaPark.z) < 4) {
-      completeMission();
+    S.objectiveDist = dist2(px, pz, mx, mz);
+    if (dist2(px, pz, mx, mz) < 4) {
+      finishMission();
     }
+    return;
+  }
+  // Stage 0: fetch the package at the Hideout.
+  S.objectiveDist = dist2(px, pz, hx, hz);
+  if (dist2(px, pz, hx, hz) < 4) {
+    S.missionStage += 1;
+    toast('Package collected', 'Deliver it to Marina Park');
+    S.objectiveText = 'Deliver the package to Marina Park';
+    placeBeacon(mx, mz);
   }
 }
 
-function updateMission1(dt) {
-  if (S.missionStage === 0) {
-    // Stage 0: steal a car. Show the distance to the nearest one.
-    const car = nearestCar(S.player.pos.x, S.player.pos.z, 500);
-    if (car) {
-      S.objectiveDist = dist2(S.player.pos.x, S.player.pos.z, car.mesh.position.x, car.mesh.position.z);
-    } else {
-      S.objectiveDist = null;
-    }
-    if (!S.onFoot) {
-      S.missionStage = 1;
-      S.objectiveText = 'Bring the car to the Hideout garage';
-      moveBeacon(LANDMARKS.hideout.x, LANDMARKS.hideout.z);
-    }
-  } else if (S.missionStage === 1) {
+function tickMission1(dt) {
+  if (S.missionStage === 1) {
     // Stage 1: drive the stolen car into the Hideout garage.
     S.objectiveDist = dist2(S.player.pos.x, S.player.pos.z, LANDMARKS.hideout.x, LANDMARKS.hideout.z);
     if (dist2(S.player.pos.x, S.player.pos.z, LANDMARKS.hideout.x, LANDMARKS.hideout.z) < 9) {
-      completeMission();
+      finishMission();
     }
+    return;
+  }
+  // Stage 0: steal a car. Show the distance to the nearest one.
+  const car = nearestCar(S.player.pos.x, S.player.pos.z, 500);
+  if (car) {
+    S.objectiveDist = dist2(S.player.pos.x, S.player.pos.z, car.mesh.position.x, car.mesh.position.z);
+  } else {
+    S.objectiveDist = null;
+  }
+  if (!S.onFoot) {
+    S.missionStage += 1;
+    S.objectiveText = 'Bring the car to the Hideout garage';
+    placeBeacon(LANDMARKS.hideout.x, LANDMARKS.hideout.z);
   }
 }
 
-function updateMission2(dt) {
+function tickMission2(dt) {
   // Lose the cops: the job only counts once it has been running a moment,
   // so a player who starts it already clean does not finish it on the
   // first frame.
-  missionClock += dt;
-  if (missionClock > 1 && S.heat <= 0) completeMission();
-}
+  jobTimer += dt;
+  if (jobTimer > 1 && S.heat <= 0) finishMission();
+} // end of tickMission2()
 
-function updateMission3(dt) {
+function tickMission3(dt) {
   // Collect the five drops.
-  for (const d of dropList) {
+  for (let i = 0; i < drops.length; i++) {
+    const d = drops[i];
     if (d.taken) continue;
     // Spin the rings so they catch the eye.
     d.mesh.rotation.z += dt * 1.5;
@@ -247,34 +272,34 @@ function updateMission3(dt) {
     if (dist2(S.player.pos.x, S.player.pos.z, d.x, d.z) < 2.5) {
       d.taken = true;
       d.mesh.visible = false;
-      dropsTaken += 1;
-      S.objectiveText = 'Collect the drops (' + dropsTaken + '/5)';
+      takenCount += 1;
+      S.objectiveText = 'Collect the drops (' + takenCount + '/5)';
       if (S.audio) S.audio.pickup();
-      if (dropsTaken >= 5) completeMission();
+      if (takenCount >= 5) finishMission();
     }
   }
 }
 
-function updateMission4(dt) {
-  S.objectiveDist = dist2(S.player.pos.x, S.player.pos.z, LANDMARKS.harbor.x, LANDMARKS.harbor.z);
-  if (dist2(S.player.pos.x, S.player.pos.z, LANDMARKS.harbor.x, LANDMARKS.harbor.z) < 10) {
-    completeMission();
+function tickMission4(dt) {
+  const hx = LANDMARKS.harbor.x;
+  const hz = LANDMARKS.harbor.z;
+  S.objectiveDist = dist2(S.player.pos.x, S.player.pos.z, hx, hz);
+  if (dist2(S.player.pos.x, S.player.pos.z, hx, hz) < 10) {
+    finishMission();
   }
-}
+} // end of tickMission4()
+
+const TICKERS = [tickMission0, tickMission1, tickMission2, tickMission3, tickMission4];
 
 export function updateMissions(dt) {
   if (S.mode !== 'playing') return;
   if (S.missionStage === 99) return; // done, waiting for the next mission
   if (!S.player) return;
-  if (S.missionIndex === 0) updateMission0(dt);
-  else if (S.missionIndex === 1) updateMission1(dt);
-  else if (S.missionIndex === 2) updateMission2(dt);
-  else if (S.missionIndex === 3) updateMission3(dt);
-  else if (S.missionIndex === 4) updateMission4(dt);
-}
+  TICKERS[S.missionIndex](dt);
+} // end of updateMissions()
 
 export function updateBeacon(dt) {
-  if (!S.beacon || !navArrow) return;
+  if (!S.beacon || !guideArrow) return;
   // Pulse the ground ring.
   const ring = S.beacon.userData.ring;
   if (ring) {
@@ -285,15 +310,15 @@ export function updateBeacon(dt) {
   }
   // The nav arrow floats above the player and points at the target. It is
   // hidden while driving and when there is no target.
-  if (!beaconGoal || !S.onFoot || !S.player || S.mode !== 'playing') {
-    navArrow.visible = false;
+  if (!beaconTarget || !S.onFoot || !S.player || S.mode !== 'playing') {
+    guideArrow.visible = false;
     return;
   }
-  navArrow.visible = true;
-  navArrow.position.set(S.player.pos.x, 2.5, S.player.pos.z);
-  const dx = beaconGoal.x - S.player.pos.x;
-  const dz = beaconGoal.z - S.player.pos.z;
-  navArrow.rotation.y = Math.atan2(dx, dz);
+  guideArrow.visible = true;
+  guideArrow.position.set(S.player.pos.x, 2.5, S.player.pos.z);
+  const dx = beaconTarget.x - S.player.pos.x;
+  const dz = beaconTarget.z - S.player.pos.z;
+  guideArrow.rotation.y = Math.atan2(dx, dz);
   // Bob gently so it reads as a floating marker.
-  navArrow.position.y = 2.5 + Math.sin(S.time * 2.5) * 0.15;
+  guideArrow.position.y = 2.5 + Math.sin(S.time * 2.5) * 0.15;
 }
