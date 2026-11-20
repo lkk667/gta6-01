@@ -1,27 +1,31 @@
-// Solmar City — localStorage autosave (v4 polish, re-implemented).
+// Solmar City — localStorage autosave.
 
 import { S } from './state.js';
 
 const KEY = 'solmar-city-save-v4';
+const SAVE_VERSION = 4;
+
+function snapshot() {
+  const p = S.player;
+  return {
+    version: SAVE_VERSION,
+    cash: S.cash,
+    health: S.health,
+    magazine: S.magazine,
+    reserve: S.reserve,
+    heat: S.heat,
+    missionsCompleted: S.missionsCompleted,
+    missionIndex: S.missionIndex,
+    x: p ? p.pos.x : 0,
+    z: p ? p.pos.z : -8,
+    heading: p ? p.heading : 0,
+    savedAt: Date.now(),
+  };
+}
 
 export function saveGame() {
   try {
-    const p = S.player;
-    const data = {
-      version: 4,
-      cash: S.cash,
-      health: S.health,
-      magazine: S.magazine,
-      reserve: S.reserve,
-      heat: S.heat,
-      missionsCompleted: S.missionsCompleted,
-      missionIndex: S.missionIndex,
-      x: p ? p.pos.x : 0,
-      z: p ? p.pos.z : -8,
-      heading: p ? p.heading : 0,
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(KEY, JSON.stringify(data));
+    localStorage.setItem(KEY, JSON.stringify(snapshot()));
     return true;
   } catch (e) {
     return false;
@@ -33,7 +37,7 @@ export function loadSave() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || data.version !== 4) return null;
+    if (!data || data.version !== SAVE_VERSION) return null;
     return data;
   } catch (e) {
     return null;

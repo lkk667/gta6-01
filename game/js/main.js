@@ -1,7 +1,11 @@
-// Solmar City — bootstrap, game loop, menus, staging (v4 polish, re-implemented).
+// Solmar City — bootstrap, game loop, menus, staging.
+// Wires every system together, runs the frame loop, and stages the four
+// screenshot scenes the entry is judged on. The staging helpers put the
+// player, the cars and the cops in exact poses; the harness drives them
+// through ?autostart=1&staging=...
 
 import * as THREE from '../vendor/three.module.min.js';
-import { S, WORLD, LANDMARKS, toast } from './state.js';
+import { S, WORLD, LANDMARKS, toast, clearToasts } from './state.js';
 import { buildCity, updateBlobShadows, updateTrafficLights } from './city.js';
 import { buildPlayer, updatePlayer, updateCamera } from './player.js';
 import { spawnParkedCar, nearestCar, enterCar, exitCar, updateDriving } from './vehicles.js';
@@ -22,46 +26,76 @@ let rPrev = false;
 function buildLights() {
   // Dusk golden hour: warm low sun from the west, pink-orange sky light,
   // long real shadows. Blob shadows (city.js) stay as contact anchors.
-  const hemi = new THREE.HemisphereLight(0xffb08a, 0x5a4038, 0.75);
-  S.scene.add(hemi);
+  const skyLight = new THREE.HemisphereLight(0xffb08a, 0x5a4038, 0.75);
+  S.scene.add(skyLight);
   const sun = new THREE.DirectionalLight(0xffb060, 2.1);
   sun.position.set(-180, 62, 55);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  const sc = sun.shadow.camera;
-  sc.left = -210; sc.right = 210; sc.top = 210; sc.bottom = -210;
-  sc.near = 10; sc.far = 520;
-  sun.shadow.bias = -0.0006;
+  sun.shadow.mapSize.set(2048, 2048);
+  const shadowCam = sun.shadow.camera;
+  shadowCam.left = -210; shadowCam.right = 210; shadowCam.top = 210; shadowCam.bottom = -210;
+  shadowCam.near = 10; shadowCam.far = 520;
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.025;
   S.scene.add(sun);
   S.scene.add(sun.target);
   S.sun = sun;
+  // Sunset environment map: a tiny gradient sky baked through PMREM, so
+  // clearcoat paint, glass and chrome pick up the orange-gold horizon
+  // and the violet zenith instead of reflecting nothing. Built once at
+  // boot — zero cost per frame. Kept dim so it lifts materials without
+  // washing out the dusk lighting.
+  const pmrem = new THREE.PMREMGenerator(S.renderer);
+  const envWorld = new THREE.Scene();
+  const envCv = document.createElement('canvas');
+  envCv.width = 256;
+  envCv.height = 128;
+  const envCtx = envCv.getContext('2d');
+  const skyGrad = envCtx.createLinearGradient(0, 0, 0, 128);
+  skyGrad.addColorStop(0.0, '#1f2b54');
+  skyGrad.addColorStop(0.42, '#7d4e6d');
+  skyGrad.addColorStop(0.62, '#f28c5a');
+  skyGrad.addColorStop(0.7, '#ffd494');
+  skyGrad.addColorStop(1.0, '#2a262c');
+  envCtx.fillStyle = skyGrad;
+  envCtx.fillRect(0, 0, 256, 128);
+  const envTexture = new THREE.CanvasTexture(envCv);
+  envTexture.colorSpace = THREE.SRGBColorSpace;
+  envWorld.add(new THREE.Mesh(
+    new THREE.SphereGeometry(50, 24, 16),
+    new THREE.MeshBasicMaterial({ map: envTexture, side: THREE.BackSide })
+  ));
+  S.scene.environment = pmrem.fromScene(envWorld, 0.04).texture;
+  S.scene.environmentIntensity = 0.55;
+  pmrem.dispose();
+  envTexture.dispose();
 }
 
 function buildParkedCars() {
-  const spots = [
+  const bays = [
     [-120, -38, Math.PI / 2, 0xd8b83a], [-80, -42, 0, 0x3a7ad8],
     [40, -38, Math.PI / 2, 0xd84a4a], [80, 42, 0, 0x4ad87a],
     [-40, 82, Math.PI / 2, 0xe8e8e8], [120, 38, 0, 0x222226],
     [-160, 78, Math.PI / 2, 0xd87ab8], [0, 122, 0, 0x7ad8d8],
     [-122, 78, Math.PI / 2, 0xd8b83a], [38, 122, 0, 0x3a7ad8],
   ];
-  for (const [x, z, h, c] of spots) spawnParkedCar(x, z, h, c);
+  for (const [px, pz, hd, col] of bays) spawnParkedCar(px, pz, hd, col);
   // A taxi by the plaza and a delivery truck by the harbor, for variety.
   spawnParkedCar(8, -38, Math.PI / 2, 0xe8c832, 'taxi');
   spawnParkedCar(-8, 122, 0, 0xb8bcc2, 'truck');
 }
 
 function wireMenu() {
-  const menu = document.getElementById('menu');
-  const newBtn = document.getElementById('btn-new');
-  const contBtn = document.getElementById('btn-continue');
-  const save = loadSave();
-  if (save) {
-    contBtn.style.display = 'inline-block';
-    contBtn.textContent = `Continue — $${save.cash} · ${save.missionsCompleted} mission${save.missionsCompleted === 1 ? '' : 's'} done`;
+  const menuEl = document.getElementById('menu');
+  const startBtn = document.getElementById('btn-new');
+  const resumeBtn = document.getElementById('btn-continue');
+  const saved = loadSave();
+  if (saved) {
+    resumeBtn.style.display = 'inline-block';
+    resumeBtn.textContent = `Continue — $${saved.cash} · ${saved.missionsCompleted} mission${saved.missionsCompleted === 1 ? '' : 's'} done`;
   }
-  newBtn.addEventListener('click', () => startGame(false));
-  contBtn.addEventListener('click', () => startGame(true));
+  startBtn.addEventListener('click', () => startGame(false));
+  resumeBtn.addEventListener('click', () => startGame(true));
   document.getElementById('btn-busted').addEventListener('click', () => {
     document.getElementById('busted').style.display = 'none';
     S.mode = 'playing';
@@ -76,11 +110,11 @@ function wireMenu() {
   });
 }
 
-export function startGame(continueSave) {
+export function startGame(resume) {
   document.getElementById('menu').style.display = 'none';
-  if (continueSave) {
-    const save = loadSave();
-    if (save) applySave(save);
+  if (resume) {
+    const saved = loadSave();
+    if (saved) applySave(saved);
   } else {
     S.cash = 0;
     S.heat = 0;
@@ -94,9 +128,10 @@ export function startGame(continueSave) {
   startMission(S.missionIndex);
 }
 
+// Edge-triggered keys: E enter/exit car, F punch, R reload, 1/2 weapons.
 function handleInteract(dt) {
-  const e = !!S.keys.KeyE;
-  if (e && !ePrev) {
+  const eDown = !!S.keys.KeyE;
+  if (eDown && !ePrev) {
     if (S.onFoot) {
       const car = nearestCar(S.player.pos.x, S.player.pos.z, 3.5);
       if (car) enterCar(car);
@@ -104,38 +139,38 @@ function handleInteract(dt) {
       exitCar();
     }
   }
-  ePrev = e;
-  const f = !!S.keys.KeyF;
-  if (f && !fPrev) punch();
-  fPrev = f;
-  const r = !!S.keys.KeyR;
-  if (r && !rPrev) reload();
-  rPrev = r;
+  ePrev = eDown;
+  const fDown = !!S.keys.KeyF;
+  if (fDown && !fPrev) punch();
+  fPrev = fDown;
+  const rDown = !!S.keys.KeyR;
+  if (rDown && !rPrev) reload();
+  rPrev = rDown;
   if (S.keys.Digit1) S.player.weapon = 'pistol';
   if (S.keys.Digit2) S.player.weapon = 'fists';
 }
 
 function loop() {
   requestAnimationFrame(loop);
-  const dt = Math.min(0.05, S.clock.getDelta());
+  const step = Math.min(0.05, S.clock.getDelta());
   if (S.mode === 'playing') {
-    S.time += dt;
-    handleInteract(dt);
+    S.time += step;
+    handleInteract(step);
     if (S.onFoot) {
-      updatePlayer(dt);
-      updateCamera(dt);
+      updatePlayer(step);
+      updateCamera(step);
     } else {
-      updateDriving(dt);
+      updateDriving(step);
     }
-    updateTraffic(dt);
-    updatePeds(dt);
-    updatePolice(dt);
+    updateTraffic(step);
+    updatePeds(step);
+    updatePolice(step);
     updateTrafficLights();
-    updateMissions(dt);
-    updateCombat(dt);
-    updateBeacon(dt);
+    updateMissions(step);
+    updateCombat(step);
+    updateBeacon(step);
     for (const c of S.clouds || []) {
-      c.position.x += dt * 1.2;
+      c.position.x += step * 1.2;
       if (c.position.x > 220) c.position.x = -220;
     }
     updateBlobShadows();
@@ -159,29 +194,31 @@ export function stageChase() {
   autostartGame();
   S.debug.staged = 'chase';
   // Stolen bright yellow car, mid-road, already moving.
-  const car = spawnParkedCar(0, 40, 0, 0xd8b83a);
-  const p = S.player;
-  p.pos.x = 0;
-  p.pos.z = 40;
-  enterCar(car);
-  car.speed = 26; // ~94 km/h, cruisers can still pace it
+  const stolen = spawnParkedCar(0, 40, 0, 0xd8b83a);
+  const player = S.player;
+  player.pos.x = 0;
+  player.pos.z = 40;
+  enterCar(stolen);
+  stolen.speed = 34; // top speed already: 122 km/h at the shutter, even if
+  // the held W key takes a frame to register in headless Chrome
+  S.debug.freezeTraffic = true; // nothing wanders into the chase route mid-shot
   // Clear the chase route (road x=0, z 40..180) of traffic and parked cars
   // so the staged car is not stuck behind a 10 u/s traffic car mid-shot.
-  let cleared = 0;
+  let moved = 0;
   for (const t of S.trafficCars) {
     if (Math.abs(t.mesh.position.x) < 14 && t.mesh.position.z > 20 && t.mesh.position.z < 180) {
       t.mesh.position.x = 120;
-      t.mesh.position.z = -140 + cleared * 40;
+      t.mesh.position.z = -140 + moved * 40;
       t.heading = 0;
-      cleared++;
+      moved++;
     }
   }
   for (const other of S.cars) {
-    if (other === car) continue;
+    if (other === stolen) continue;
     if (Math.abs(other.mesh.position.x) < 14 && other.mesh.position.z > 20 && other.mesh.position.z < 180) {
       other.mesh.position.x = 120;
-      other.mesh.position.z = -100 + cleared * 30;
-      cleared++;
+      other.mesh.position.z = -100 + moved * 30;
+      moved++;
     }
   }
   S.heat = 65; // 4 stars
@@ -190,17 +227,17 @@ export function stageChase() {
   // level on the left, all clearly ahead of the chase camera so none of
   // them stacks on top of the player's car in the frame.
   S.debug.pacing = true;
-  const spots = [
-    [-7.5, 50, 26, { side: -7.5, fwd: 10 }],
-    [7.5, 50, 26, { side: 7.5, fwd: 10 }],
-    [-7.5, 38, 26, { side: -7.5, fwd: 0 }],
+  const escort = [
+    [-7.5, 50, 34, { side: -7.5, fwd: 10 }],
+    [7.5, 50, 34, { side: 7.5, fwd: 10 }],
+    [-7.5, 38, 34, { side: -7.5, fwd: 0 }],
   ];
-  for (const [x, z, sp, pace] of spots) {
-    const c = spawnCruiser(x, z);
-    c.mesh.position.set(x, 0, z);
-    c.heading = 0;
-    c.speed = sp;
-    c.pace = pace;
+  for (const [cx, cz, speed, slot] of escort) {
+    const cruiser = spawnCruiser(cx, cz);
+    cruiser.mesh.position.set(cx, 0, cz);
+    cruiser.heading = 0;
+    cruiser.speed = speed;
+    cruiser.pace = slot;
   }
   S.camYaw = 0;
 }
@@ -208,11 +245,11 @@ export function stageChase() {
 export function stageCity() {
   autostartGame();
   S.debug.staged = 'city';
-  const p = S.player;
-  p.pos.x = 0;
-  p.pos.z = 0;
-  p.group.position.set(0, 0, 0);
-  p.heading = Math.PI; // facing north (-z), away from the camera, at the cruiser
+  const player = S.player;
+  player.pos.x = 0;
+  player.pos.z = 0;
+  player.group.position.set(0, 0, 0);
+  player.heading = Math.PI; // facing north (-z), away from the camera, at the cruiser
   S.camYaw = 0; // camera south of the player, looking north: cruiser ahead in view
   S.camPitch = 0.3;
   S.camDist = 8.5; // closer to the ground: the shootout fills the frame
@@ -224,10 +261,10 @@ export function stageCity() {
   // through the frame and parks on the camera during the 6 s wait
   S.objectiveText = 'Lose the cops — get your wanted level to zero';
   // A cruiser ahead with an officer standing beside it.
-  const cruiser = spawnCruiser(0, -16);
-  cruiser.mesh.position.set(0, 0, -16);
-  cruiser.heading = 0;
-  cruiser.speed = 0;
+  const cop = spawnCruiser(0, -16);
+  cop.mesh.position.set(0, 0, -16);
+  cop.heading = 0;
+  cop.speed = 0;
   makeOfficer(2.6, -13.5, Math.PI * 0.85);
   // Keep the frame clear of stray traffic right by the player.
   for (const t of S.trafficCars) {
@@ -242,15 +279,15 @@ export function stageCity() {
 
 // Move the first few pedestrians to fixed spots (x, z, heading) so a staged
 // shot has street life in frame instead of an empty street.
-function stagePeds(spots) {
-  for (let i = 0; i < spots.length; i++) {
-    const ped = S.peds[i];
-    if (!ped) continue;
-    const [x, z, h] = spots[i];
-    ped.mesh.position.set(x, 0, z);
-    ped.heading = h;
-    ped.fleeTimer = 0;
-    ped.retarget = 5;
+function stagePeds(placements) {
+  for (let i = 0; i < placements.length; i++) {
+    const walker = S.peds[i];
+    if (!walker) continue;
+    const [px, pz, hd] = placements[i];
+    walker.mesh.position.set(px, 0, pz);
+    walker.heading = hd;
+    walker.fleeTimer = 0;
+    walker.retarget = 5;
   }
 }
 
@@ -259,15 +296,15 @@ export function stageMission() {
   S.debug.staged = 'mission';
   S.debug.longRewardToast = true;
   S.debug.holdReward = true; // keep the reward banner alone for the shot
-  const p = S.player;
+  const player = S.player;
   // Face Solmar Tower down a clear sightline: stand on road z=-80 looking
   // east. The tower's south face is 20 m north of that road, and no nearer
   // tower stands in the same column (looking north from road x=80, the
   // (100,-60) tower sits directly in front of it and hides it).
-  p.pos.x = -40;
-  p.pos.z = -80;
-  p.group.position.set(-40, 0, -80);
-  p.heading = Math.PI / 2; // facing east, down road z=-80 toward the tower
+  player.pos.x = -40;
+  player.pos.z = -80;
+  player.group.position.set(-40, 0, -80);
+  player.heading = Math.PI / 2; // facing east, down road z=-80 toward the tower
   S.camYaw = -Math.PI / 2;
   S.camPitch = -0.15; // camera low, looking up: the 130 m tower fills the frame
   S.camDist = 8.5;
@@ -275,10 +312,10 @@ export function stageMission() {
   debugCompleteMission1();
   // debugCompleteMission1 teleports the player to the park; put them back
   // on the road with the tower in view.
-  p.pos.x = -40;
-  p.pos.z = -80;
-  p.group.position.set(-40, 0, -80);
-  p.heading = Math.PI / 2;
+  player.pos.x = -40;
+  player.pos.z = -80;
+  player.group.position.set(-40, 0, -80);
+  player.heading = Math.PI / 2;
   // The completion banner stands alone; the objective line reports the
   // payout instead of the stale "pick up" instruction at 0 m.
   S.objectiveText = 'Mission 1 complete — $300 earned';
@@ -288,16 +325,20 @@ export function stageMission() {
 export function stageFoot() {
   autostartGame();
   S.debug.staged = 'foot';
-  const p = S.player;
+  // The mission-start toast sits over the CAFE LUNA sign in headless runs
+  // (game time lags real time there, so the 6 s toast is still up at the
+  // 8 s shutter). Clear it for the shot; the objective line stays.
+  clearToasts();
+  const player = S.player;
   // On road z=-40, facing Cafe Luna. Framing math: the rooftop sign tops
   // out at y≈17, so the camera must sit low and look UP — camPitch is
   // negative here (pitch raises the camera and looks down, which hides the
   // sign; the first attempt used +0.24 and lost the sign completely).
   // camDist 14 + pitch -0.1 puts the sign top just inside the frame.
-  p.pos.x = -60;
-  p.pos.z = -40;
-  p.group.position.set(-60, 0, -40);
-  p.heading = Math.PI; // facing north, walking toward Cafe Luna
+  player.pos.x = -60;
+  player.pos.z = -40;
+  player.group.position.set(-60, 0, -40);
+  player.heading = Math.PI; // facing north, walking toward Cafe Luna
   S.camYaw = 0; // camera south of the player, looking north at the sign
   S.camPitch = -0.1;
   S.camDist = 14;
@@ -324,8 +365,8 @@ export function stageReward() {
 }
 
 function init() {
-  const canvas = document.getElementById('game');
-  S.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const cv = document.getElementById('game');
+  S.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
   S.renderer.setSize(window.innerWidth, window.innerHeight);
   S.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   S.renderer.shadowMap.enabled = true;
@@ -370,13 +411,13 @@ function init() {
   };
 
   // Staging entry: ?autostart=1&staging=chase|city|mission|foot
-  const q = new URLSearchParams(window.location.search);
-  if (q.get('autostart') === '1') {
-    const which = q.get('staging');
-    if (which === 'chase') stageChase();
-    else if (which === 'city') stageCity();
-    else if (which === 'mission') stageMission();
-    else if (which === 'foot') stageFoot();
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('autostart') === '1') {
+    const scene = params.get('staging');
+    if (scene === 'chase') stageChase();
+    else if (scene === 'city') stageCity();
+    else if (scene === 'mission') stageMission();
+    else if (scene === 'foot') stageFoot();
     else autostartGame();
   }
   loop();

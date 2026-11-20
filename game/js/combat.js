@@ -1,4 +1,4 @@
-// Solmar City — combat: pistol, punch, pickups (v4 polish, re-implemented).
+// Solmar City — combat: pistol, punch, pickups.
 // The muzzle flash lives on the gun mesh itself (player.js), so the flash
 // can never sit apart from the barrel the way a camera-relative flash did.
 
@@ -7,16 +7,16 @@ import { S, addHeat, dist2, clamp } from './state.js';
 import { aimDirection, muzzleWorldPos } from './player.js';
 import { scarePeds } from './traffic.js';
 
-let tracer = null;
-let tracerTimer = 0;
-let shakeTimer = 0;
-let smokeHoldTimer = 0;
-const particles = [];
-const smokePuffs = [];
-let smokeTex = null;
+let shotLine = null;
+let lineTimer = 0;
+let shakeLeft = 0;
+let smokeClock = 0;
+const shards = [];
+const puffs = [];
+let puffTex = null;
 
-function getSmokeTex() {
-  if (smokeTex) return smokeTex;
+function smokeTexture() {
+  if (puffTex) return puffTex;
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 64;
@@ -26,20 +26,20 @@ function getSmokeTex() {
   for (const [pos, col] of stops) grad.addColorStop(pos, col);
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 64);
-  smokeTex = new THREE.CanvasTexture(c);
-  return smokeTex;
+  puffTex = new THREE.CanvasTexture(c);
+  return puffTex;
 }
 
-function spawnSmoke(pos) {
+function puffSmoke(pos) {
   for (let i = 0; i < 2; i++) {
-    const mat = new THREE.SpriteMaterial({ map: getSmokeTex(), transparent: true, depthWrite: false, opacity: 0.6 });
+    const mat = new THREE.SpriteMaterial({ map: smokeTexture(), transparent: true, depthWrite: false, opacity: 0.6 });
     const sp = new THREE.Sprite(mat);
     sp.position.copy(pos);
     sp.position.x += (Math.random() - 0.5) * 0.3;
     sp.position.y += (Math.random() - 0.5) * 0.2;
     sp.scale.set(0.7, 0.7, 1);
     S.scene.add(sp);
-    smokePuffs.push({ sprite: sp, life: 0.7, max: 0.7, vy: 0.9 + Math.random() * 0.5 });
+    puffs.push({ sprite: sp, life: 0.7, max: 0.7, vy: 0.9 + Math.random() * 0.5 });
   }
 }
 
@@ -47,12 +47,12 @@ export function buildCombat() {
   // One reusable tracer line, hidden until a shot is fired.
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-  tracer = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0 }));
-  S.scene.add(tracer);
-  spawnPickups();
+  shotLine = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0 }));
+  S.scene.add(shotLine);
+  placePickups();
 }
 
-function spawnPickups() {
+function placePickups() {
   const spots = [
     { kind: 'health', x: 20, z: -20 }, { kind: 'ammo', x: -20, z: 20 },
     { kind: 'cash', x: 60, z: -60 }, { kind: 'health', x: -100, z: 40 },
@@ -67,7 +67,7 @@ function spawnPickups() {
   }
 }
 
-function burstParticles(pos, color, count) {
+function burstShards(pos, color, count) {
   for (let i = 0; i < count; i++) {
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(0.12, 0.12, 0.12),
@@ -75,7 +75,7 @@ function burstParticles(pos, color, count) {
     );
     m.position.copy(pos);
     S.scene.add(m);
-    particles.push({
+    shards.push({
       mesh: m,
       vx: (Math.random() - 0.5) * 6,
       vy: Math.random() * 4,
@@ -86,25 +86,25 @@ function burstParticles(pos, color, count) {
 }
 
 export function shoot() {
-  const p = S.player;
-  if (!p || S.mode !== 'playing' || !S.onFoot) return false;
-  if (p.weapon !== 'pistol') return false;
+  const player = S.player;
+  if (!player || S.mode !== 'playing' || !S.onFoot) return false;
+  if (player.weapon !== 'pistol') return false;
   if (S.magazine <= 0) {
     if (S.audio) S.audio.click();
     return false;
   }
   S.magazine--;
-  p.flashTimer = 0.09;
+  player.flashTimer = 0.09;
   if (S.debug.holdFlash) {
-    p.flashMat.opacity = 0.95;
-    p.flashLight.intensity = 10;
+    player.flashMat.opacity = 0.95;
+    player.flashLight.intensity = 10;
   }
-  shakeTimer = 0.12;
+  shakeLeft = 0.12;
   addHeat(6);
   const from = muzzleWorldPos(new THREE.Vector3());
   // A little grey smoke at the muzzle that drifts up and fades — the flash
   // is a star at the barrel, the smoke is the only thing that lingers.
-  spawnSmoke(from);
+  puffSmoke(from);
   const dir = aimDirection();
   // Raycast against cars, cruisers, peds and buildings.
   const ray = new THREE.Raycaster(from, dir);
@@ -122,10 +122,10 @@ export function shoot() {
     // Walk up to the car/ped root to decide the impact effect.
     let root = hit.object;
     while (root.parent && root.parent !== S.scene) root = root.parent;
-    const isPed = S.peds.some((pd) => pd.mesh === root);
-    const isCruiser = S.cruisers.some((cr) => cr.mesh === root);
-    burstParticles(end, isPed ? 0xd84a4a : isCruiser ? 0xffd94a : 0x9a9a9a, 8);
-    if (isPed) {
+    const hitPed = S.peds.some((pd) => pd.mesh === root);
+    const hitCop = S.cruisers.some((cr) => cr.mesh === root);
+    burstShards(end, hitPed ? 0xd84a4a : hitCop ? 0xffd94a : 0x9a9a9a, 8);
+    if (hitPed) {
       const ped = S.peds.find((pd) => pd.mesh === root);
       ped.fleeTimer = 3;
       ped.stumble = 0.5;
@@ -133,27 +133,27 @@ export function shoot() {
     }
   }
   // Tracer from the muzzle to the hit point.
-  const pos = tracer.geometry.attributes.position;
+  const pos = shotLine.geometry.attributes.position;
   pos.setXYZ(0, from.x, from.y, from.z);
   pos.setXYZ(1, end.x, end.y, end.z);
   pos.needsUpdate = true;
-  tracer.material.opacity = 0.9;
-  tracerTimer = 0.08;
-  scarePeds(p.pos.x, p.pos.z, 26);
+  shotLine.material.opacity = 0.9;
+  lineTimer = 0.08;
+  scarePeds(player.pos.x, player.pos.z, 26);
   if (S.audio) S.audio.gunshot();
   return true;
 }
 
 export function punch() {
-  const p = S.player;
-  if (!p || S.mode !== 'playing' || !S.onFoot) return;
-  p.punchTimer = 0.28;
+  const player = S.player;
+  if (!player || S.mode !== 'playing' || !S.onFoot) return;
+  player.punchTimer = 0.28;
   if (S.audio) S.audio.punch();
   // Shove the nearest pedestrian.
   let best = null;
   let bestD = 2.2;
   for (const ped of S.peds) {
-    const d = dist2(p.pos.x, p.pos.z, ped.mesh.position.x, ped.mesh.position.z);
+    const d = dist2(player.pos.x, player.pos.z, ped.mesh.position.x, ped.mesh.position.z);
     if (d < bestD) {
       bestD = d;
       best = ped;
@@ -176,36 +176,36 @@ export function reload() {
 }
 
 export function updateCombat(dt) {
-  if (tracerTimer > 0) {
-    tracerTimer -= dt;
-    if (tracerTimer <= 0) tracer.material.opacity = 0;
+  if (lineTimer > 0) {
+    lineTimer -= dt;
+    if (lineTimer <= 0) shotLine.material.opacity = 0;
   }
-  if (shakeTimer > 0) {
-    shakeTimer -= dt;
+  if (shakeLeft > 0) {
+    shakeLeft -= dt;
     const s = 0.06;
     S.camera.position.x += (Math.random() - 0.5) * s;
     S.camera.position.y += (Math.random() - 0.5) * s;
   }
-  for (let i = particles.length - 1; i >= 0; i--) {
-    const pt = particles[i];
-    pt.life -= dt;
-    if (pt.life <= 0) {
-      S.scene.remove(pt.mesh);
-      particles.splice(i, 1);
+  for (let i = shards.length - 1; i >= 0; i--) {
+    const sh = shards[i];
+    sh.life -= dt;
+    if (sh.life <= 0) {
+      S.scene.remove(sh.mesh);
+      shards.splice(i, 1);
       continue;
     }
-    pt.mesh.position.x += pt.vx * dt;
-    pt.mesh.position.y += pt.vy * dt;
-    pt.mesh.position.z += pt.vz * dt;
-    pt.vy -= 9 * dt;
+    sh.mesh.position.x += sh.vx * dt;
+    sh.mesh.position.y += sh.vy * dt;
+    sh.mesh.position.z += sh.vz * dt;
+    sh.vy -= 9 * dt;
   }
   // Smoke puffs rise, grow and fade out.
-  for (let i = smokePuffs.length - 1; i >= 0; i--) {
-    const sm = smokePuffs[i];
+  for (let i = puffs.length - 1; i >= 0; i--) {
+    const sm = puffs[i];
     sm.life -= dt;
     if (sm.life <= 0) {
       S.scene.remove(sm.sprite);
-      smokePuffs.splice(i, 1);
+      puffs.splice(i, 1);
       continue;
     }
     sm.sprite.position.y += sm.vy * dt;
@@ -216,32 +216,32 @@ export function updateCombat(dt) {
   // Staged shot: while the flash is held open, keep a wisp of smoke
   // curling off the muzzle so the shot reads as a fresh gunshot.
   if (S.debug.holdFlash && S.player) {
-    smokeHoldTimer -= dt;
-    if (smokeHoldTimer <= 0) {
-      smokeHoldTimer = 0.35;
-      spawnSmoke(muzzleWorldPos(new THREE.Vector3()));
+    smokeClock -= dt;
+    if (smokeClock <= 0) {
+      smokeClock = 0.35;
+      puffSmoke(muzzleWorldPos(new THREE.Vector3()));
     }
   }
   // Pickups: spin, bob, collect on touch.
-  const p = S.player;
+  const player = S.player;
   for (const pk of S.pickups) {
     if (pk.taken) continue;
     pk.spin += dt * 2;
     pk.mesh.rotation.y = pk.spin;
     pk.mesh.position.y = 1 + Math.sin(pk.spin * 1.4) * 0.15;
-    if (p && dist2(p.pos.x, p.pos.z, pk.mesh.position.x, pk.mesh.position.z) < 1.6) {
-      pk.taken = true;
-      pk.mesh.visible = false;
-      if (pk.kind === 'health') {
-        S.health = clamp(S.health + 40, 0, S.maxHealth);
-        if (S.audio) S.audio.pickup();
-      } else if (pk.kind === 'ammo') {
-        S.reserve += 24;
-        if (S.audio) S.audio.pickup();
-      } else {
-        S.cash += 50;
-        if (S.audio) S.audio.pickup();
-      }
+    if (!player) continue;
+    if (dist2(player.pos.x, player.pos.z, pk.mesh.position.x, pk.mesh.position.z) >= 1.6) continue;
+    pk.taken = true;
+    pk.mesh.visible = false;
+    if (pk.kind === 'health') {
+      S.health = clamp(S.health + 40, 0, S.maxHealth);
+      if (S.audio) S.audio.pickup();
+    } else if (pk.kind === 'ammo') {
+      S.reserve += 24;
+      if (S.audio) S.audio.pickup();
+    } else {
+      S.cash += 50;
+      if (S.audio) S.audio.pickup();
     }
   }
 }

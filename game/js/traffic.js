@@ -1,4 +1,4 @@
-// Solmar City — traffic cars and pedestrians (v4 polish, re-implemented).
+// Solmar City — traffic cars + pedestrians.
 // 28 cars loop the road grid; 40 pedestrians walk the sidewalks, flee
 // gunfire, and dodge cars coming at them instead of standing in the road
 // while a car passes through them.
@@ -8,18 +8,17 @@ import { S, WORLD, dist2, clamp } from './state.js';
 import { makeCar } from './vehicles.js';
 import { attachBlob, resolveCollisions, trafficLightState } from './city.js';
 
-const PED_SHIRTS = [0xe84a4a, 0x4a8ae8, 0x4ad87a, 0xe8d84a, 0xd87ab8, 0x7ad8d8, 0xf2f2f2, 0x8a5a3a, 0xe87a2a, 0x9a6ad8, 0x3a8a6a, 0xd8d8d8];
-const PED_SKINS = [0xe8b88a, 0xc88a5a, 0x8a5a34, 0xf2c8a0];
-const PED_PANTS = [0x2c2f36, 0x3a4a6a, 0x6a3a3a, 0x4a5a3a, 0x8a7a5a];
+const SHIRT_COLORS = [0xe84a4a, 0x4a8ae8, 0x4ad87a, 0xe8d84a, 0xd87ab8, 0x7ad8d8, 0xf2f2f2, 0x8a5a3a, 0xe87a2a, 0x9a6ad8, 0x3a8a6a, 0xd8d8d8];
+const SKIN_TONES = [0xe8b88a, 0xc88a5a, 0x8a5a34, 0xf2c8a0];
+const PANTS_COLORS = [0x2c2f36, 0x3a4a6a, 0x6a3a3a, 0x4a5a3a, 0x8a7a5a];
 
-// Pick a random entry from a palette array.
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-
+// Build a pedestrian: boxy low-poly figure on a shadow blob.
 function buildPedestrian() {
   const g = new THREE.Group();
-  const shirtMat = new THREE.MeshLambertMaterial({ color: pick(PED_SHIRTS) });
-  const skinMat = new THREE.MeshLambertMaterial({ color: pick(PED_SKINS) });
-  const pantsMat = new THREE.MeshLambertMaterial({ color: pick(PED_PANTS) });
+  const sample = (list) => list[Math.floor(Math.random() * list.length)];
+  const shirtMat = new THREE.MeshLambertMaterial({ color: sample(SHIRT_COLORS) });
+  const skinMat = new THREE.MeshLambertMaterial({ color: sample(SKIN_TONES) });
+  const pantsMat = new THREE.MeshLambertMaterial({ color: sample(PANTS_COLORS) });
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.62, 0.3), shirtMat);
   torso.position.y = 1.05;
   torso.castShadow = true;
@@ -31,7 +30,7 @@ function buildPedestrian() {
   // Varied looks: a cap, hair, or bare head.
   const roll = Math.random();
   if (roll < 0.35) {
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.25, 0.09, 10), new THREE.MeshLambertMaterial({ color: pick(PED_SHIRTS) }));
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.25, 0.09, 10), new THREE.MeshLambertMaterial({ color: sample(SHIRT_COLORS) }));
     cap.position.y = 1.79;
     g.add(cap);
   } else if (roll < 0.65) {
@@ -42,30 +41,30 @@ function buildPedestrian() {
   // Legs pivot at the hip, arms at the shoulder, so the walk swing reads.
   const legGeo = new THREE.BoxGeometry(0.19, 0.68, 0.2);
   legGeo.translate(0, -0.34, 0);
-  const legL = new THREE.Mesh(legGeo, pantsMat);
-  legL.position.set(-0.14, 0.68, 0);
-  g.add(legL);
-  const legR = legL.clone();
-  legR.position.x = 0.14;
-  g.add(legR);
+  const leftLeg = new THREE.Mesh(legGeo, pantsMat);
+  leftLeg.position.set(-0.14, 0.68, 0);
+  g.add(leftLeg);
+  const rightLeg = leftLeg.clone();
+  rightLeg.position.x = 0.14;
+  g.add(rightLeg);
   const armGeo = new THREE.BoxGeometry(0.16, 0.62, 0.18);
   armGeo.translate(0, -0.31, 0);
-  const armL = new THREE.Mesh(armGeo, shirtMat);
-  armL.position.set(-0.37, 1.32, 0);
-  g.add(armL);
-  const armR = armL.clone();
-  armR.position.x = 0.37;
-  g.add(armR);
+  const leftArm = new THREE.Mesh(armGeo, shirtMat);
+  leftArm.position.set(-0.37, 1.32, 0);
+  g.add(leftArm);
+  const rightArm = leftArm.clone();
+  rightArm.position.x = 0.37;
+  g.add(rightArm);
   // Varied height: not every pedestrian is the same cut-out.
   const s = 0.92 + Math.random() * 0.16;
   g.scale.set(s, s, s);
-  return { group: g, legL, legR, armL, armR };
+  return { group: g, leftLeg, rightLeg, leftArm, rightArm };
 }
 
 export function buildTraffic() {
   // Traffic cars: 28, spread round-robin over the roads so every street
-  // carries 3–4 moving cars (v3 had 14 across the whole city). Mixed
-  // models: mostly sedans, some taxis, a few trucks.
+  // carries 3–4 moving cars. Mixed models: mostly sedans, some taxis,
+  // a few trucks.
   const roads = [...WORLD.roads];
   for (let i = 0; i < 28; i++) {
     const alongX = Math.random() > 0.5;
@@ -98,10 +97,10 @@ export function buildTraffic() {
     attachBlob(built.group, 1.4, 0.03);
     S.peds.push({
       mesh: built.group,
-      legL: built.legL,
-      legR: built.legR,
-      armL: built.armL,
-      armR: built.armR,
+      legL: built.leftLeg,
+      legR: built.rightLeg,
+      armL: built.leftArm,
+      armR: built.rightArm,
       heading: Math.random() * Math.PI * 2,
       speed: 1.1 + Math.random() * 0.9,
       walkPhase: Math.random() * 6,

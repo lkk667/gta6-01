@@ -1,19 +1,24 @@
-// Solmar City — keyboard + mouse input (v4 polish, re-implemented).
+// Solmar City — keyboard + mouse input.
 // Pointer lock with a drag-orbit fallback for browsers that refuse it.
 
 import { S } from './state.js';
 
+const SCROLL_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'];
+
+function clampPitch() {
+  S.camPitch = Math.max(-0.15, Math.min(0.85, S.camPitch));
+}
+
 export function buildInput() {
   const canvas = S.renderer.domElement;
+
   window.addEventListener('keydown', (e) => {
     S.keys[e.code] = true;
     if (e.code === 'KeyM') {
       S.muted = !S.muted;
       if (S.audio) S.audio.engine(0, false);
     }
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
-      e.preventDefault();
-    }
+    if (SCROLL_KEYS.includes(e.code)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => {
     S.keys[e.code] = false;
@@ -40,11 +45,11 @@ export function buildInput() {
     if (S.pointerLocked) {
       S.camYaw -= e.movementX * 0.0032;
       S.camPitch += e.movementY * 0.0022;
-      S.camPitch = Math.max(-0.15, Math.min(0.85, S.camPitch));
+      clampPitch();
     } else if (S.dragOrbit && e.buttons === 1) {
       S.camYaw -= e.movementX * 0.005;
       S.camPitch += e.movementY * 0.003;
-      S.camPitch = Math.max(-0.15, Math.min(0.85, S.camPitch));
+      clampPitch();
     }
   });
   canvas.addEventListener('mousedown', (e) => {

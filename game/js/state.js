@@ -1,4 +1,4 @@
-// Solmar City — shared state (v4 polish, re-implemented).
+// Solmar City — shared state.
 // One mutable world object every system reads and writes. No network, no
 // imports from other game modules: this file stands alone.
 
@@ -23,8 +23,12 @@ export const LANDMARKS = {
 };
 
 export const S = {
+  // run state
   mode: 'menu', // 'menu' | 'playing' | 'busted'
   time: 0,
+  version: 4,
+  saveLoaded: false,
+  // player stats
   cash: 0,
   health: 100,
   maxHealth: 100,
@@ -32,11 +36,13 @@ export const S = {
   magSize: 12,
   reserve: 60,
   heat: 0, // 0..100, maps to 0..5 stars
+  // mission progress
   missionsCompleted: 0,
   missionIndex: 0,
   missionStage: 0, // per-mission sub-stage (e.g. 0 = steal a car, 1 = drive to garage)
   objectiveText: '',
   objectiveDist: null, // metres to the current target, null = show no distance
+  // movement
   onFoot: true,
   speedKmh: 0,
   bustTimer: 0,
@@ -54,6 +60,7 @@ export const S = {
   pickups: [],
   colliders: [], // { x, z, r } circles the player and cars must not enter
   beacon: null, // { group, ring, pillar, gem, target: {x,z} }
+  // ui + input
   toasts: [],
   toastSeq: 0,
   keys: {},
@@ -67,17 +74,18 @@ export const S = {
   muted: false,
   audio: null,
   debug: { longRewardToast: false, holdFlash: false, staged: null },
-  saveLoaded: false,
-  version: 4,
 };
+
+const STAR_CUTS = [20, 40, 60, 85];
 
 export function starsFromHeat(heat) {
   if (heat <= 0) return 0;
-  if (heat < 20) return 1;
-  if (heat < 40) return 2;
-  if (heat < 60) return 3;
-  if (heat < 85) return 4;
-  return 5;
+  let stars = 1;
+  for (const cut of STAR_CUTS) {
+    if (heat >= cut) stars++;
+    else break;
+  }
+  return stars;
 }
 
 export function addHeat(amount) {
@@ -90,38 +98,39 @@ export function clearToasts() {
 
 // Push a banner. `life` seconds, default 5. Oldest banners drop past 4.
 export function toast(text, sub, life) {
-  const now = S.time;
   const entry = {
     id: ++S.toastSeq,
     text,
     sub: sub || '',
-    until: now + (life === undefined ? 5 : life),
+    until: S.time + (life === undefined ? 5 : life),
   };
   S.toasts.push(entry);
-  if (S.toasts.length > 4) S.toasts.shift();
+  while (S.toasts.length > 4) S.toasts.shift();
   return entry;
 }
 
 // Deterministic PRNG so the city layout is stable between runs.
 export function mulberry32(seed) {
-  let a = seed >>> 0;
+  let state = seed >>> 0;
   return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    state |= 0;
+    state = (state + 0x6d2b79f5) | 0;
+    let mix = Math.imul(state ^ (state >>> 15), 1 | state);
+    mix = (mix + Math.imul(mix ^ (mix >>> 7), 61 | mix)) ^ mix;
+    return ((mix ^ (mix >>> 14)) >>> 0) / 4294967296;
   };
 }
 
 export function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v;
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
 }
 
 export function dist2(ax, az, bx, bz) {
   const dx = ax - bx;
   const dz = az - bz;
-  return Math.sqrt(dx * dx + dz * dz);
+  return Math.hypot(dx, dz);
 }
 
 // Nearest road coordinate to a value (roads every 40 units).
