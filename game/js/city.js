@@ -254,129 +254,129 @@ function flat(color) {
   return new THREE.MeshLambertMaterial({ color });
 }
 
-function layGround() {
-  // Paver tiles under everything, so the ground between the roads reads
-  // as pavement instead of one flat brown plane.
-  const pavers = sidewalkMap();
-  pavers.repeat.set(48, 48);
-  const ground = new THREE.Mesh(
+function layStreets() {
+  // A tiled pavement under the whole city, so the ground between the
+  // roads reads as paving, not one flat brown slab.
+  const tiles = sidewalkMap();
+  tiles.repeat.set(48, 48);
+  const base = new THREE.Mesh(
     new THREE.PlaneGeometry(WORLD.size, WORLD.size),
-    new THREE.MeshStandardMaterial({ map: pavers, roughness: 0.9 })
+    new THREE.MeshStandardMaterial({ map: tiles, roughness: 0.9 })
   );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  S.scene.add(ground);
+  base.rotation.x = -Math.PI / 2;
+  base.receiveShadow = true;
+  S.scene.add(base);
 
-  // Plaza around the centre intersection.
-  const plaza = new THREE.Mesh(
+  // The central plaza, around the middle intersection.
+  const square = new THREE.Mesh(
     new THREE.PlaneGeometry(70, 70),
     new THREE.MeshLambertMaterial({ map: plazaSurface() })
   );
-  plaza.rotation.x = -Math.PI / 2;
-  plaza.position.set(0, 0.02, 0);
-  plaza.receiveShadow = true;
-  S.scene.add(plaza);
+  square.rotation.x = -Math.PI / 2;
+  square.position.set(0, 0.02, 0);
+  square.receiveShadow = true;
+  S.scene.add(square);
 
-  // Roads: asphalt with a roughness map so the dusk sun catches the wear
+  // Roads: asphalt with a roughness map so the dusk sun catches the worn
   // bands. The tile repeats ten times down each road, laying the centre
   // dash and edge lines along the whole street.
-  const tar = asphaltMaps();
-  tar.map.repeat.set(1, 10);
-  tar.roughnessMap.repeat.set(1, 10);
-  const roadMat = new THREE.MeshStandardMaterial({
-    map: tar.map, roughnessMap: tar.roughnessMap, roughness: 0.92, metalness: 0.05,
+  const asphalt = asphaltMaps();
+  asphalt.map.repeat.set(1, 10);
+  asphalt.roughnessMap.repeat.set(1, 10);
+  const streetMat = new THREE.MeshStandardMaterial({
+    map: asphalt.map, roughnessMap: asphalt.roughnessMap, roughness: 0.92, metalness: 0.05,
   });
-  for (const r of WORLD.roads) {
-    const ns = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, WORLD.size), roadMat);
-    ns.rotation.x = -Math.PI / 2;
-    ns.position.set(r, 0.015, 0);
-    ns.receiveShadow = true;
-    S.scene.add(ns);
-    // East-west roads need the tile turned: clone the maps and repeat
+  for (const road of WORLD.roads) {
+    const nsStrip = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, WORLD.size), streetMat);
+    nsStrip.rotation.x = -Math.PI / 2;
+    nsStrip.position.set(road, 0.015, 0);
+    nsStrip.receiveShadow = true;
+    S.scene.add(nsStrip);
+    // For east-west roads the tile turns: clone the maps and repeat
     // across instead of along.
-    const ewMat = roadMat.clone();
-    ewMat.map = tar.map.clone();
-    ewMat.map.repeat.set(10, 1);
-    ewMat.map.needsUpdate = true;
-    ewMat.roughnessMap = tar.roughnessMap.clone();
-    ewMat.roughnessMap.repeat.set(10, 1);
-    ewMat.roughnessMap.needsUpdate = true;
-    const ew = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.size, ROAD_W), ewMat);
-    ew.rotation.x = -Math.PI / 2;
-    ew.rotation.z = Math.PI / 2;
-    ew.position.set(0, 0.015, r);
-    ew.receiveShadow = true;
-    S.scene.add(ew);
-    // Curbs: pale raised strips along both edges of the road, tall enough
-    // to read as a real edge between asphalt and pavement, on both the
-    // north-south and the east-west roads.
-    for (const s of [-1, 1]) {
-      const curbNS = addBox(0.55, 0.24, WORLD.size, flat(0xd8d0b8), r + s * (ROAD_W / 2 + 0.28), 0.12, 0);
-      curbNS.castShadow = false;
-      const curbEW = addBox(WORLD.size, 0.24, 0.55, flat(0xd8d0b8), 0, 0.12, r + s * (ROAD_W / 2 + 0.28));
-      curbEW.castShadow = false;
+    const ewStreetMat = streetMat.clone();
+    ewStreetMat.map = asphalt.map.clone();
+    ewStreetMat.map.repeat.set(10, 1);
+    ewStreetMat.map.needsUpdate = true;
+    ewStreetMat.roughnessMap = asphalt.roughnessMap.clone();
+    ewStreetMat.roughnessMap.repeat.set(10, 1);
+    ewStreetMat.roughnessMap.needsUpdate = true;
+    const ewStrip = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.size, ROAD_W), ewStreetMat);
+    ewStrip.rotation.x = -Math.PI / 2;
+    ewStrip.rotation.z = Math.PI / 2;
+    ewStrip.position.set(0, 0.015, road);
+    ewStrip.receiveShadow = true;
+    S.scene.add(ewStrip);
+    // Kerbs: pale raised strips on both edges of each road, tall enough
+    // to read as a real edge between asphalt and pavement, north-south
+    // and east-west alike.
+    for (const side of [-1, 1]) {
+      const curbN = addBox(0.55, 0.24, WORLD.size, flat(0xd8d0b8), road + side * (ROAD_W / 2 + 0.28), 0.12, 0);
+      curbN.castShadow = false;
+      const curbE = addBox(WORLD.size, 0.24, 0.55, flat(0xd8d0b8), 0, 0.12, road + side * (ROAD_W / 2 + 0.28));
+      curbE.castShadow = false;
     }
   }
 
-  // Crosswalks at every intersection: five white stripes across each
+  // Zebra crossings at every junction: five white stripes across each
   // road, on both approaches.
-  const stripeMat = new THREE.MeshBasicMaterial({ color: 0xe8e6da });
-  const stripe = (w, d, x, z) => {
-    const s = new THREE.Mesh(new THREE.PlaneGeometry(w, d), stripeMat);
-    s.rotation.x = -Math.PI / 2;
-    s.position.set(x, 0.03, z);
-    S.scene.add(s);
+  const crossMat = new THREE.MeshBasicMaterial({ color: 0xe8e6da });
+  const paintStripe = (sw, sd, sx, sz) => {
+    const mark = new THREE.Mesh(new THREE.PlaneGeometry(sw, sd), crossMat);
+    mark.rotation.x = -Math.PI / 2;
+    mark.position.set(sx, 0.03, sz);
+    S.scene.add(mark);
   };
-  for (const rx of WORLD.roads) {
-    for (const rz of WORLD.roads) {
-      for (let i = -2; i <= 2; i++) {
-        stripe(1.1, 3.4, rx + i * 2, rz + ROAD_W / 2 + 2.2);
-        stripe(3.4, 1.1, rx + ROAD_W / 2 + 2.2, rz + i * 2);
+  for (const roadX of WORLD.roads) {
+    for (const roadZ of WORLD.roads) {
+      for (let k = -2; k <= 2; k++) {
+        paintStripe(1.1, 3.4, roadX + k * 2, roadZ + ROAD_W / 2 + 2.2);
+        paintStripe(3.4, 1.1, roadX + ROAD_W / 2 + 2.2, roadZ + k * 2);
       }
     }
   }
 
-  // Stop lines: one white bar across each lane just before every
-  // crossing, so intersections read as real junctions from the driver's
-  // seat. Batched into a single instanced mesh — 324 bars, one draw call.
-  const stopSpots = [];
-  for (const rx of WORLD.roads) {
-    for (const rz of WORLD.roads) {
-      stopSpots.push([rx, rz + ROAD_W / 2 + 5.4, 3.6, 0.5]);
-      stopSpots.push([rx, rz - ROAD_W / 2 - 5.4, 3.6, 0.5]);
-      stopSpots.push([rx + ROAD_W / 2 + 5.4, rz, 0.5, 3.6]);
-      stopSpots.push([rx - ROAD_W / 2 - 5.4, rz, 0.5, 3.6]);
+  // Stop bars: one white bar across each lane just before every crossing,
+  // so junctions read as real ones from the driver's seat. Batched into
+  // a single instanced mesh — 324 bars, one draw call.
+  const stopList = [];
+  for (const roadX of WORLD.roads) {
+    for (const roadZ of WORLD.roads) {
+      stopList.push([roadX, roadZ + ROAD_W / 2 + 5.4, 3.6, 0.5]);
+      stopList.push([roadX, roadZ - ROAD_W / 2 - 5.4, 3.6, 0.5]);
+      stopList.push([roadX + ROAD_W / 2 + 5.4, roadZ, 0.5, 3.6]);
+      stopList.push([roadX - ROAD_W / 2 - 5.4, roadZ, 0.5, 3.6]);
     }
   }
-  const stopGeo = new THREE.PlaneGeometry(1, 1);
-  stopGeo.rotateX(-Math.PI / 2);
-  const stopMesh = new THREE.InstancedMesh(stopGeo, stripeMat, stopSpots.length);
-  const dummy = new THREE.Object3D();
-  stopSpots.forEach(([x, z, w, d], i) => {
-    dummy.position.set(x, 0.03, z);
-    dummy.scale.set(w, 1, d);
-    dummy.updateMatrix();
-    stopMesh.setMatrixAt(i, dummy.matrix);
+  const stopShape = new THREE.PlaneGeometry(1, 1);
+  stopShape.rotateX(-Math.PI / 2);
+  const stopBatch = new THREE.InstancedMesh(stopShape, crossMat, stopList.length);
+  const placer = new THREE.Object3D();
+  stopList.forEach(([bx, bz, bw, bd], idx) => {
+    placer.position.set(bx, 0.03, bz);
+    placer.scale.set(bw, 1, bd);
+    placer.updateMatrix();
+    stopBatch.setMatrixAt(idx, placer.matrix);
   });
-  stopMesh.instanceMatrix.needsUpdate = true;
-  S.scene.add(stopMesh);
+  stopBatch.instanceMatrix.needsUpdate = true;
+  S.scene.add(stopBatch);
 
-  // Beach + ocean at the south edge (deep dusk blue water, warm sand).
-  const sand = new THREE.Mesh(
+  // The beach and the sea at the south edge: warm sand, deep dusk-blue water.
+  const beach = new THREE.Mesh(
     new THREE.PlaneGeometry(WORLD.size, 34),
     new THREE.MeshLambertMaterial({ map: grainTex('#e8c890', ['#d8b878', '#f2d4a0', '#c8a868'], 700, 3) })
   );
-  sand.rotation.x = -Math.PI / 2;
-  sand.position.set(0, 0.02, WORLD.half - 17);
-  sand.receiveShadow = true;
-  S.scene.add(sand);
-  const ocean = new THREE.Mesh(
+  beach.rotation.x = -Math.PI / 2;
+  beach.position.set(0, 0.02, WORLD.half - 17);
+  beach.receiveShadow = true;
+  S.scene.add(beach);
+  const sea = new THREE.Mesh(
     new THREE.PlaneGeometry(900, 300),
     new THREE.MeshLambertMaterial({ color: 0x2a4a7a })
   );
-  ocean.rotation.x = -Math.PI / 2;
-  ocean.position.set(0, -0.4, WORLD.half + 150);
-  S.scene.add(ocean);
+  sea.rotation.x = -Math.PI / 2;
+  sea.position.set(0, -0.4, WORLD.half + 150);
+  S.scene.add(sea);
 }
 
 // Shared shop-sign textures: one small dark plate with a glowing name each,
@@ -402,119 +402,119 @@ function shopSignTex(name) {
   return tex;
 }
 
-function raiseTower(x, z, w, d, h, color) {
-  // Facade style varies by block so neighbouring towers don't match:
+function erectTower(bx, bz, bw, bd, bh, paint) {
+  // Each block gets its own facade style so neighbours don't match:
   // warm stone, glass curtain wall, deco, concrete or brick, each with
-  // its own lit-window emissive map so the windows glow at dusk. The
-  // facade texture itself carries windows of different sizes, a few
+  // a lit-window emissive map of its own so the windows glow at dusk.
+  // The facade texture carries windows of different sizes, a few
   // balconies and air-conditioner boxes, so no two faces are identical.
-  const style = Math.abs(Math.floor(x * 0.7 + z * 1.3)) % 5;
-  const face = facadeMaps(style);
-  const mat = new THREE.MeshStandardMaterial({
-    map: face.map, emissive: 0xffffff, emissiveMap: face.emissiveMap,
-    emissiveIntensity: 1.15, roughness: face.roughness, metalness: face.metalness,
+  const kind = Math.abs(Math.floor(bx * 0.7 + bz * 1.3)) % 5;
+  const skin = facadeMaps(kind);
+  const wallMat = new THREE.MeshStandardMaterial({
+    map: skin.map, emissive: 0xffffff, emissiveMap: skin.emissiveMap,
+    emissiveIntensity: 1.15, roughness: skin.roughness, metalness: skin.metalness,
   });
-  const m = addBox(w, h, d, mat, x, h / 2, z);
-  m.castShadow = true;
-  m.receiveShadow = true;
-  // Darker ground-floor plinth: a stone base a little wider than the
-  // tower, so the building meets the pavement instead of floating on it.
-  const plinth = addBox(w + 0.6, 1.1, d + 0.6, flat(0x4a4440), x, 0.55, z);
-  plinth.castShadow = false;
-  plinth.receiveShadow = true;
-  // Varied roofline: a setback upper floor on about a third of towers,
+  const tower = addBox(bw, bh, bd, wallMat, bx, bh / 2, bz);
+  tower.castShadow = true;
+  tower.receiveShadow = true;
+  // A stone plinth at the ground floor, a little wider than the tower,
+  // so the building meets the pavement instead of floating on it.
+  const base = addBox(bw + 0.6, 1.1, bd + 0.6, flat(0x4a4440), bx, 0.55, bz);
+  base.castShadow = false;
+  base.receiveShadow = true;
+  // A varied roofline: a setback upper floor on about a third of towers,
   // sometimes shifted off-centre so the skyline steps instead of lining
   // up flat.
   if (dice() < 0.35) {
-    const offX = (dice() - 0.5) * w * 0.3;
-    const offZ = (dice() - 0.5) * d * 0.3;
-    const upper = addBox(w * 0.55, 3 + dice() * 4, d * 0.55, flat(color), x + offX, h + 1.5 + dice() * 2, z + offZ);
-    upper.castShadow = true;
+    const shiftX = (dice() - 0.5) * bw * 0.3;
+    const shiftZ = (dice() - 0.5) * bd * 0.3;
+    const topFloor = addBox(bw * 0.55, 3 + dice() * 4, bd * 0.55, flat(paint), bx + shiftX, bh + 1.5 + dice() * 2, bz + shiftZ);
+    topFloor.castShadow = true;
   } else {
-    // Rooftop cap so towers read as buildings, not plain boxes.
-    const cap = addBox(w * 0.7, 1.2, d * 0.7, flat(0x5a5a62), x, h + 0.6, z);
-    cap.castShadow = true;
+    // A rooftop cap, so towers read as buildings and not plain boxes.
+    const roofCap = addBox(bw * 0.7, 1.2, bd * 0.7, flat(0x5a5a62), bx, bh + 0.6, bz);
+    roofCap.castShadow = true;
   }
-  // Rooftop props: water tank, antenna with a red tip, or AC unit.
-  const prop = dice();
-  if (prop < 0.35) {
-    const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 2.4, 8), flat(0x7a5a3a));
-    tank.position.set(x + w * 0.2, h + 1.2, z - d * 0.15);
-    tank.castShadow = true;
-    S.scene.add(tank);
-    addBox(0.3, 1, 0.3, flat(0x4a3a2a), x + w * 0.2, h + 0.5, z - d * 0.15);
-  } else if (prop < 0.6) {
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 7, 5), flat(0x2c2f36));
-    mast.position.set(x - w * 0.2, h + 3.5, z + d * 0.2);
-    S.scene.add(mast);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), new THREE.MeshBasicMaterial({ color: 0xff4a4a }));
-    tip.position.set(x - w * 0.2, h + 7, z + d * 0.2);
-    S.scene.add(tip);
-  } else if (prop < 0.85) {
-    const ac = addBox(2.2, 1, 1.6, flat(0x9aa0a8), x + w * 0.15, h + 0.5, z + d * 0.1);
-    ac.castShadow = true;
+  // A rooftop prop: a water tank, an antenna with a red tip, or an AC unit.
+  const pick = dice();
+  if (pick < 0.35) {
+    const cistern = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 2.4, 8), flat(0x7a5a3a));
+    cistern.position.set(bx + bw * 0.2, bh + 1.2, bz - bd * 0.15);
+    cistern.castShadow = true;
+    S.scene.add(cistern);
+    addBox(0.3, 1, 0.3, flat(0x4a3a2a), bx + bw * 0.2, bh + 0.5, bz - bd * 0.15);
+  } else if (pick < 0.6) {
+    const aerial = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 7, 5), flat(0x2c2f36));
+    aerial.position.set(bx - bw * 0.2, bh + 3.5, bz + bd * 0.2);
+    S.scene.add(aerial);
+    const tipLight = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), new THREE.MeshBasicMaterial({ color: 0xff4a4a }));
+    tipLight.position.set(bx - bw * 0.2, bh + 7, bz + bd * 0.2);
+    S.scene.add(tipLight);
+  } else if (pick < 0.85) {
+    const cooler = addBox(2.2, 1, 1.6, flat(0x9aa0a8), bx + bw * 0.15, bh + 0.5, bz + bd * 0.1);
+    cooler.castShadow = true;
   }
-  // Ground-floor storefront on the south face, central blocks only: a lit
-  // shop window, a striped awning and a small glowing name sign, so the
-  // street level is shops instead of blank walls.
-  if (Math.abs(x) <= 100 && Math.abs(z) <= 100 && dice() < 0.55) {
-    const faceZ = z + d / 2;
-    const frame = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 3), new THREE.MeshLambertMaterial({ color: 0x2c241c }));
-    frame.position.set(x, 1.7, faceZ + 0.05);
-    S.scene.add(frame);
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 2.5), new THREE.MeshBasicMaterial({ color: 0xffc27a }));
-    glass.position.set(x, 1.7, faceZ + 0.1);
-    S.scene.add(glass);
-    addBox(0.12, 2.5, 0.06, flat(0x2c241c), x, 1.7, faceZ + 0.14);
-    const awnTex = paintCanvas(128, 32, (g, aw, ah) => {
-      for (let i = 0; i < 6; i++) {
-        g.fillStyle = i % 2 ? '#f2e8d8' : '#3a7ad8';
-        g.fillRect((i * aw) / 6, 0, aw / 6, ah);
+  // A storefront on the ground floor, south face, central blocks only:
+  // a lit shop window, a striped awning and a small glowing name sign,
+  // so the street level is shops instead of blank walls.
+  if (Math.abs(bx) <= 100 && Math.abs(bz) <= 100 && dice() < 0.55) {
+    const frontZ = bz + bd / 2;
+    const shopFrame = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 3), new THREE.MeshLambertMaterial({ color: 0x2c241c }));
+    shopFrame.position.set(bx, 1.7, frontZ + 0.05);
+    S.scene.add(shopFrame);
+    const shopGlass = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 2.5), new THREE.MeshBasicMaterial({ color: 0xffc27a }));
+    shopGlass.position.set(bx, 1.7, frontZ + 0.1);
+    S.scene.add(shopGlass);
+    addBox(0.12, 2.5, 0.06, flat(0x2c241c), bx, 1.7, frontZ + 0.14);
+    const awnCanvas = paintCanvas(128, 32, (ctx, cw, ch) => {
+      for (let k = 0; k < 6; k++) {
+        ctx.fillStyle = k % 2 ? '#f2e8d8' : '#3a7ad8';
+        ctx.fillRect((k * cw) / 6, 0, cw / 6, ch);
       }
     });
-    const awn = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.6), new THREE.MeshLambertMaterial({ map: awnTex }));
-    awn.position.set(x, 3.6, faceZ + 0.9);
-    awn.rotation.x = -0.4;
-    S.scene.add(awn);
-    const shop = SHOP_NAMES[Math.floor(dice() * SHOP_NAMES.length)];
-    const sign = new THREE.Mesh(
+    const canopy = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.6), new THREE.MeshLambertMaterial({ map: awnCanvas }));
+    canopy.position.set(bx, 3.6, frontZ + 0.9);
+    canopy.rotation.x = -0.4;
+    S.scene.add(canopy);
+    const shopName = SHOP_NAMES[Math.floor(dice() * SHOP_NAMES.length)];
+    const shopSign = new THREE.Mesh(
       new THREE.PlaneGeometry(5.2, 1.3),
-      new THREE.MeshBasicMaterial({ map: shopSignTex(shop) })
+      new THREE.MeshBasicMaterial({ map: shopSignTex(shopName) })
     );
-    sign.position.set(x, 4.9, faceZ + 0.12);
-    S.scene.add(sign);
+    shopSign.position.set(bx, 4.9, frontZ + 0.12);
+    S.scene.add(shopSign);
   }
-  S.colliders.push({ x, z, r: Math.max(w, d) * 0.72 });
-  placeBlob(x, z, Math.max(w, d) * 1.5, 0.025);
-  return m;
+  S.colliders.push({ x: bx, z: bz, r: Math.max(bw, bd) * 0.72 });
+  placeBlob(bx, bz, Math.max(bw, bd) * 1.5, 0.025);
+  return tower;
 }
 
-function layBlocks() {
-  // One tower per block cell, skipping park / landmark / beach cells.
-  const skip = new Set();
-  const skipCell = (cx, cz) => skip.add(cx + ',' + cz);
-  skipCell(40, 40); // Marina Park
-  skipCell(-60, -60); // Cafe Luna block
-  skipCell(-140, 140); // Hideout block
-  skipCell(100, -100); // Solmar Tower block
-  skipCell(140, -60); // hospital block
-  for (const rx of WORLD.roads) {
-    for (const rz of WORLD.roads) {
-      const cx = rx + 20, cz = rz + 20;
-      if (cz >= 150) continue; // beach strip
-      if (skip.has(cx + ',' + cz)) continue;
-      const w = 16 + dice() * 10;
-      const d = 16 + dice() * 10;
-      let h = 12 + dice() * 34;
-      // Keep the tower row just north of road z=-80 low (max 22 m) so the
-      // 130 m Solmar Tower reads clearly above it from the mission staging
-      // on that road — a tall tower in this row hides the landmark entirely.
-      if (cz === -100 && cx >= -20 && cx <= 100) h = Math.min(h, 22);
-      const color = PASTELS[Math.floor(dice() * PASTELS.length)];
-      raiseTower(cx, cz, w, d, h, color);
-      // A few blocks get a second, lower neighbour tower.
+function layTowers() {
+  // One tower in each block cell, except the park, landmark and beach cells.
+  const omit = new Set();
+  const omitCell = (ox, oz) => omit.add(ox + ',' + oz);
+  omitCell(40, 40); // Marina Park
+  omitCell(-60, -60); // Cafe Luna block
+  omitCell(-140, 140); // Hideout block
+  omitCell(100, -100); // Solmar Tower block
+  omitCell(140, -60); // hospital block
+  for (const roadX of WORLD.roads) {
+    for (const roadZ of WORLD.roads) {
+      const cellX = roadX + 20, cellZ = roadZ + 20;
+      if (cellZ >= 150) continue; // beach strip
+      if (omit.has(cellX + ',' + cellZ)) continue;
+      const bw = 16 + dice() * 10;
+      const bd = 16 + dice() * 10;
+      let bh = 12 + dice() * 34;
+      // Hold the tower row just north of road z=-80 low (22 m max) so the
+      // 130 m Solmar Tower still reads above it from the mission staging
+      // on that road — a tall tower in this row would hide the landmark.
+      if (cellZ === -100 && cellX >= -20 && cellX <= 100) bh = Math.min(bh, 22);
+      const paint = PASTELS[Math.floor(dice() * PASTELS.length)];
+      erectTower(cellX, cellZ, bw, bd, bh, paint);
+      // A few blocks get a second, lower neighbour.
       if (dice() < 0.3) {
-        raiseTower(cx + (dice() > 0.5 ? 8 : -8), cz + (dice() > 0.5 ? 7 : -7), 10, 10, 8 + dice() * 10, PASTELS[Math.floor(dice() * PASTELS.length)]);
+        erectTower(cellX + (dice() > 0.5 ? 8 : -8), cellZ + (dice() > 0.5 ? 7 : -7), 10, 10, 8 + dice() * 10, PASTELS[Math.floor(dice() * PASTELS.length)]);
       }
     }
   }
@@ -804,63 +804,63 @@ function buildGarage() {
   addBox(12, 0.3, 0.3, new THREE.MeshBasicMaterial({ color: 0xffb84a }), cx + 11.2, 7.6, cz);
 }
 
-function buildLandmarkTower() {
-  const cx = 100, cz = -100;
-  // The city's landmark: 130 m, far taller than the 12–46 m neighbours, so
-  // it reads above the tower row from the street (at 95 m the (20,-100)
-  // tower hid it completely from road z=-80).
-  // Glass curtain wall for the landmark tower: clone the facade maps so
-  // the 130 m face can repeat the window grid three times up its height
+function buildTowerLandmark() {
+  const tx = 100, tz = -100;
+  // The city landmark, 130 m tall — far above the 12–46 m neighbours — so
+  // it reads above the tower row from the street. At 95 m the (20,-100)
+  // tower hid it completely from road z=-80.
+  // A glass curtain wall for the landmark: clone the facade maps so the
+  // 130 m face can repeat the window grid three times up its height
   // without changing the repeat on every other glass tower.
-  const face = facadeMaps(1);
-  const faceMap = face.map.clone();
-  faceMap.repeat.set(1, 3);
-  faceMap.needsUpdate = true;
-  const faceGlow = face.emissiveMap.clone();
-  faceGlow.repeat.set(1, 3);
-  faceGlow.needsUpdate = true;
-  const towerMat = new THREE.MeshStandardMaterial({
-    map: faceMap, emissive: 0xffffff, emissiveMap: faceGlow,
-    emissiveIntensity: 1.2, roughness: face.roughness, metalness: face.metalness,
+  const skin = facadeMaps(1);
+  const skinMap = skin.map.clone();
+  skinMap.repeat.set(1, 3);
+  skinMap.needsUpdate = true;
+  const skinGlow = skin.emissiveMap.clone();
+  skinGlow.repeat.set(1, 3);
+  skinGlow.needsUpdate = true;
+  const wallMat = new THREE.MeshStandardMaterial({
+    map: skinMap, emissive: 0xffffff, emissiveMap: skinGlow,
+    emissiveIntensity: 1.2, roughness: skin.roughness, metalness: skin.metalness,
   });
-  const m = addBox(26, 130, 26, towerMat, cx, 65, cz);
-  m.castShadow = true;
-  m.receiveShadow = true;
-  void m;
-  S.colliders.push({ x: cx, z: cz, r: 19 });
-  placeBlob(cx, cz, 36, 0.025);
-  // Spire + red aircraft beacon on the crown, so the top reads as a
-  // landmark even where the sign is out of frame.
-  const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.8, 16, 6), flat(0x2c2f36));
-  spire.position.set(cx, 138, cz);
-  S.scene.add(spire);
-  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
-  beacon.position.set(cx, 146.5, cz);
-  S.scene.add(beacon);
-  const signTex2 = neonSign([
+  const tower = addBox(26, 130, 26, wallMat, tx, 65, tz);
+  tower.castShadow = true;
+  tower.receiveShadow = true;
+  void tower;
+  S.colliders.push({ x: tx, z: tz, r: 19 });
+  placeBlob(tx, tz, 36, 0.025);
+  // A spire and a red aircraft beacon on the crown, so the top reads as
+  // a landmark even where the sign is out of frame.
+  const spike = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.8, 16, 6), flat(0x2c2f36));
+  spike.position.set(tx, 138, tz);
+  S.scene.add(spike);
+  const beaconLight = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
+  beaconLight.position.set(tx, 146.5, tz);
+  S.scene.add(beaconLight);
+  const signTex = neonSign([
     { text: 'SOLMAR TOWER', size: 56, color: '#9ad8ff', y: 128 },
   ], '#9ad8ff', '#4da8ff');
-  const sign = new THREE.Mesh(
+  const signSouth = new THREE.Mesh(
     new THREE.PlaneGeometry(18, 9),
-    new THREE.MeshBasicMaterial({ map: signTex2, side: THREE.FrontSide })
+    new THREE.MeshBasicMaterial({ map: signTex, side: THREE.FrontSide })
   );
-  sign.position.set(cx, 100, cz + 13.2);
-  S.scene.add(sign);
+  signSouth.position.set(tx, 100, tz + 13.2);
+  S.scene.add(signSouth);
   // A second copy on the west face: the mission staging looks east down
   // road z=-80, so it sees the tower's west face, not the south face.
-  // Without this the landmark reads as just another tall dark tower.
+  // Without it the landmark reads as just another tall dark tower.
   // It is big (28 m wide) and high (y=90) so the letters read at street
   // distance and the sign clears the nearer rooftops that used to hide
   // it — the earlier 24 m sign at y=68 sat behind a tall block and
   // never made it into the mission frame. It sits below the mission
   // banner at the top of the frame instead of hiding behind it.
-  const signWest = new THREE.Mesh(
+  const signWestFace = new THREE.Mesh(
     new THREE.PlaneGeometry(28, 14),
-    new THREE.MeshBasicMaterial({ map: signTex2, side: THREE.FrontSide })
+    new THREE.MeshBasicMaterial({ map: signTex, side: THREE.FrontSide })
   );
-  signWest.rotation.y = -Math.PI / 2;
-  signWest.position.set(cx - 13.2, 80, cz);
-  S.scene.add(signWest);
+  signWestFace.rotation.y = -Math.PI / 2;
+  signWestFace.position.set(tx - 13.2, 80, tz);
+  S.scene.add(signWestFace);
 }
 
 function buildClinic() {
@@ -882,33 +882,33 @@ function buildClinic() {
   S.scene.add(sign);
 }
 
-function buildHarbor() {
-  const hx = 0, hz = 168;
-  // Pier planks out over the sand into the water.
-  const pier = addBox(14, 0.4, 26, flat(0x8a6a42), hx, 0.5, hz + 12);
-  void pier;
-  for (let i = 0; i < 5; i++) {
-    addBox(2.4, 2.4, 2.4, flat(0xa8803a), hx - 5 + dice() * 10, 1.6, hz - 6 + dice() * 8);
+function buildMarina() {
+  const px = 0, pz = 168;
+  // A plank pier running out over the sand into the water.
+  const jetty = addBox(14, 0.4, 26, flat(0x8a6a42), px, 0.5, pz + 12);
+  void jetty;
+  for (let k = 0; k < 5; k++) {
+    addBox(2.4, 2.4, 2.4, flat(0xa8803a), px - 5 + dice() * 10, 1.6, pz - 6 + dice() * 8);
   }
-  const tex = neonSign([
+  const signTex = neonSign([
     { text: 'SOLMAR HARBOR', size: 52, color: '#7ad8ff', y: 128 },
   ], '#7ad8ff', '#4da8ff');
   // Narrow (12 m) so it fits the gap between the towers flanking road x=0
   // instead of being clipped by them — the v3 cover read "OLMAR HARBO".
-  const sign = new THREE.Mesh(
+  const harborSign = new THREE.Mesh(
     new THREE.PlaneGeometry(12, 6),
-    new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide })
+    new THREE.MeshBasicMaterial({ map: signTex, side: THREE.FrontSide })
   );
-  sign.position.set(hx, 11, hz - 4);
-  sign.rotation.y = Math.PI;
-  S.scene.add(sign);
-  // Moored boats: simple hulls bobbing past the pier.
-  for (let i = 0; i < 3; i++) {
-    const hull = new THREE.Mesh(new THREE.ConeGeometry(2.2, 7, 6), flat(0xe8e8e8));
-    hull.rotation.z = Math.PI / 2;
-    hull.rotation.y = (dice() - 0.5) * 0.4;
-    hull.position.set(hx - 16 + i * 16, 0.4, hz + 26 + dice() * 6);
-    S.scene.add(hull);
+  harborSign.position.set(px, 11, pz - 4);
+  harborSign.rotation.y = Math.PI;
+  S.scene.add(harborSign);
+  // Boats moored past the pier: simple hulls bobbing on the water.
+  for (let k = 0; k < 3; k++) {
+    const boat = new THREE.Mesh(new THREE.ConeGeometry(2.2, 7, 6), flat(0xe8e8e8));
+    boat.rotation.z = Math.PI / 2;
+    boat.rotation.y = (dice() - 0.5) * 0.4;
+    boat.position.set(px - 16 + k * 16, 0.4, pz + 26 + dice() * 6);
+    S.scene.add(boat);
   }
 }
 
@@ -1124,14 +1124,14 @@ function laySidewalkProps() {
 
 export function buildCity() {
   buildSky();
-  layGround();
-  layBlocks();
+  layStreets();
+  layTowers();
   layPark();
   buildCafe();
   buildGarage();
-  buildLandmarkTower();
+  buildTowerLandmark();
   buildClinic();
-  buildHarbor();
+  buildMarina();
   layLamps();
   buildSignals();
   layProps();
