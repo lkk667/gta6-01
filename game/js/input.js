@@ -1,65 +1,55 @@
 // Solmar City — keyboard + mouse input.
-// Pointer lock with a drag-orbit fallback for browsers that refuse it.
+// Tracks held keys in S.keys (by e.code), accumulates mouse deltas into
+// S.mouseDX / S.mouseDY for the camera, and owns pointer lock with a
+// drag-orbit fallback for browsers that refuse the lock. M toggles sound.
 
 import { S } from './state.js';
 
-const SCROLL_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'];
-
-function clampPitch() {
-  S.camPitch = Math.max(-0.15, Math.min(0.85, S.camPitch));
-}
-
 export function buildInput() {
-  const canvas = S.renderer.domElement;
-
   window.addEventListener('keydown', (e) => {
     S.keys[e.code] = true;
-    if (e.code === 'KeyM') {
-      S.muted = !S.muted;
-      if (S.audio) S.audio.engine(0, false);
-    }
-    if (SCROLL_KEYS.includes(e.code)) e.preventDefault();
+    // M toggles sound, once per press (not on key repeat).
+    if (e.code === 'KeyM' && !e.repeat) S.muted = !S.muted;
+    // Keep the page from scrolling on Space (the handbrake) while playing.
+    if (e.code === 'Space' && S.mode === 'playing') e.preventDefault();
   });
   window.addEventListener('keyup', (e) => {
     S.keys[e.code] = false;
   });
   window.addEventListener('blur', () => {
-    S.keys = {};
+    // Losing the window clears every held key, so the player never comes
+    // back to a car driving itself into the ocean.
+    for (const k of Object.keys(S.keys)) S.keys[k] = false;
   });
 
-  canvas.addEventListener('click', () => {
+  const cv = document.getElementById('game');
+  // Click the canvas to lock the mouse for looking around. A click also
+  // fires the shoot handler in main.js; the two listeners do not clash.
+  cv.addEventListener('mousedown', (e) => {
     if (S.mode !== 'playing') return;
-    if (S.audio) S.audio.unlock();
-    if (!S.pointerLocked && canvas.requestPointerLock) {
-      try {
-        const r = canvas.requestPointerLock();
-        if (r && r.catch) r.catch(() => { /* fallback: drag orbit */ });
-      } catch (e) { /* fallback: drag orbit */ }
+    if (e.button === 0 && !S.pointerLocked) {
+      try { cv.requestPointerLock(); } catch (_) { /* drag-orbit fallback */ }
     }
-  });
-  document.addEventListener('pointerlockchange', () => {
-    S.pointerLocked = document.pointerLockElement === canvas;
-  });
-  document.addEventListener('mousemove', (e) => {
-    if (S.mode !== 'playing') return;
-    if (S.pointerLocked) {
-      S.camYaw -= e.movementX * 0.0032;
-      S.camPitch += e.movementY * 0.0022;
-      clampPitch();
-    } else if (S.dragOrbit && e.buttons === 1) {
-      S.camYaw -= e.movementX * 0.005;
-      S.camPitch += e.movementY * 0.003;
-      clampPitch();
-    }
-  });
-  canvas.addEventListener('mousedown', (e) => {
     if (e.button === 0) S.dragOrbit = true;
   });
   window.addEventListener('mouseup', () => {
     S.dragOrbit = false;
   });
-  canvas.addEventListener('wheel', (e) => {
-    const next = S.camDist + Math.sign(e.deltaY) * 0.8;
-    S.camDist = Math.max(5, Math.min(14, next));
+  document.addEventListener('pointerlockchange', () => {
+    S.pointerLocked = document.pointerLockElement === cv;
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (S.pointerLocked) {
+      S.mouseDX += e.movementX || 0;
+      S.mouseDY += e.movementY || 0;
+    } else if (S.dragOrbit && S.mode === 'playing') {
+      S.mouseDX += e.movementX || 0;
+      S.mouseDY += e.movementY || 0;
+    }
+  });
+  // Mouse wheel zooms the chase / third-person camera in and out.
+  cv.addEventListener('wheel', (e) => {
+    if (S.mode !== 'playing') return;
+    S.camDist = Math.min(16, Math.max(4, S.camDist + Math.sign(e.deltaY) * 1.2));
   }, { passive: true });
 }

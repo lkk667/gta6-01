@@ -1,69 +1,54 @@
-// Solmar City — localStorage autosave.
+// Solmar City — save / continue.
+// Persists the campaign to localStorage under a versioned key so a stale
+// save from an older build never loads. The menu's Continue button reads
+// the same key. Autosave fires every 10 s from the game loop.
 
 import { S } from './state.js';
 
-const KEY = 'solmar-city-save-v4';
+const SAVE_KEY = 'solmar-city-save-v4';
 const SAVE_VERSION = 4;
-
-function snapshot() {
-  const p = S.player;
-  return {
-    version: SAVE_VERSION,
-    cash: S.cash,
-    health: S.health,
-    magazine: S.magazine,
-    reserve: S.reserve,
-    heat: S.heat,
-    missionsCompleted: S.missionsCompleted,
-    missionIndex: S.missionIndex,
-    x: p ? p.pos.x : 0,
-    z: p ? p.pos.z : -8,
-    heading: p ? p.heading : 0,
-    savedAt: Date.now(),
-  };
-}
 
 export function saveGame() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(snapshot()));
-    return true;
-  } catch (e) {
-    return false;
+    const data = {
+      version: SAVE_VERSION,
+      cash: S.cash,
+      missionsCompleted: S.missionsCompleted,
+      missionIndex: S.missionIndex,
+      freeRoam: S.freeRoam,
+      health: S.health,
+      playerX: S.player ? S.player.pos.x : 0,
+      playerZ: S.player ? S.player.pos.z : 0,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (_) {
+    // Storage can be unavailable (private mode, quota); the game keeps
+    // running and the menu simply shows no Continue button.
   }
 }
 
 export function loadSave() {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (!data || data.version !== SAVE_VERSION) return null;
     return data;
-  } catch (e) {
+  } catch (_) {
     return null;
   }
 }
 
-export function applySave(data) {
-  if (!data) return false;
-  S.cash = data.cash || 0;
-  S.health = data.health || 100;
-  S.magazine = data.magazine === undefined ? 12 : data.magazine;
-  S.reserve = data.reserve === undefined ? 60 : data.reserve;
-  S.heat = data.heat || 0;
-  S.missionsCompleted = data.missionsCompleted || 0;
-  S.missionIndex = data.missionIndex || 0;
-  const p = S.player;
-  if (p) {
-    p.pos.x = data.x || 0;
-    p.pos.z = data.z === undefined ? -8 : data.z;
-    p.heading = data.heading || 0;
-    p.group.position.set(p.pos.x, 0, p.pos.z);
+export function applySave(saved) {
+  if (!saved) return;
+  S.cash = saved.cash || 0;
+  S.missionsCompleted = saved.missionsCompleted || 0;
+  S.missionIndex = saved.missionIndex || 0;
+  S.freeRoam = !!saved.freeRoam;
+  S.health = saved.health != null ? saved.health : 100;
+  if (S.player && saved.playerX != null && saved.playerZ != null) {
+    S.player.pos.x = saved.playerX;
+    S.player.pos.z = saved.playerZ;
+    S.player.group.position.set(saved.playerX, 0, saved.playerZ);
   }
-  S.saveLoaded = true;
-  return true;
-}
-
-export function clearSave() {
-  try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
 }

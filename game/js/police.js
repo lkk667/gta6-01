@@ -1,13 +1,17 @@
 // Solmar City — wanted level, police cruisers, BUSTED.
-// Cruisers are faster than the player now (32 + 1.5/star vs the player's 34),
-// so a chase stays a chase; their light bars flash red/blue with glow halos.
+// Cruisers are faster than the player now (32 + 1.5/star vs the player's
+// 34), so a chase stays a chase; their light bars flash red/blue with
+// glow halos. The officer on the street is built to read as a person —
+// tapered uniform, neck, a head that is small next to the shoulders —
+// with the badge, belt, holster, radio, patch and name tag that mark the
+// uniform.
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, WORLD, starsFromHeat, addHeat, dist2, clamp } from './state.js';
 import { makeCar } from './vehicles.js';
 import { resolveCollisions, attachBlob } from './city.js';
 
-let spawnTimer = 0;
+let spawnClock = 0;
 
 // One place for the light-bar flash state: lenses, glow halos, and the
 // red/blue pools on the road under the cruiser.
@@ -45,7 +49,7 @@ export function spawnCruiser(nearX, nearZ) {
   return cruiser;
 }
 
-function removeCruiser(cruiser) {
+function dropCruiser(cruiser) {
   S.scene.remove(cruiser.mesh);
   const i = S.cruisers.indexOf(cruiser);
   if (i >= 0) S.cruisers.splice(i, 1);
@@ -58,14 +62,14 @@ export function updatePolice(dt) {
     const moving = S.onFoot ? (S.player && S.player.speed > 1) : !!S.currentCar;
     addHeat(-dt * (moving ? 0.9 : 1.8));
   }
-  spawnTimer -= dt;
+  spawnClock -= dt;
   const count = wanted === 0 ? 0 : Math.min(wanted + 1, 5);
-  if (wanted > 0 && S.cruisers.length < count && spawnTimer <= 0 && !S.debug.pacing && !S.debug.noSpawn) {
-    spawnTimer = 1.2;
+  if (wanted > 0 && S.cruisers.length < count && spawnClock <= 0 && !S.debug.pacing && !S.debug.noSpawn) {
+    spawnClock = 1.2;
     spawnCruiser(S.player.pos.x, S.player.pos.z);
   }
   if (wanted === 0 && S.cruisers.length > 0 && Math.random() < dt * 0.3) {
-    removeCruiser(S.cruisers[0]);
+    dropCruiser(S.cruisers[0]);
   }
 
   const playerX = S.player.pos.x;
@@ -159,7 +163,7 @@ export function triggerBusted() {
   S.bustedAt = S.time;
   S.heat = 0;
   S.bustTimer = 0;
-  for (const c of [...S.cruisers]) removeCruiser(c);
+  for (const c of [...S.cruisers]) dropCruiser(c);
   if (S.currentCar) {
     S.currentCar.driver = null;
     S.currentCar = null;
@@ -182,57 +186,69 @@ export function makeOfficer(x, z, heading) {
   const officer = new THREE.Group();
   const uniform = new THREE.MeshLambertMaterial({ color: 0x1c2a4a });
   const skinMat = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.7, 0.32), uniform);
-  chest.position.y = 1.1;
+  // Tapered uniform: chest wider than the waist, shoulder bar on top,
+  // neck, and a head that is small next to the shoulders.
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.4, 0.28), uniform);
+  chest.position.y = 1.22;
   officer.add(chest);
-  const face = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 8), skinMat);
-  face.position.y = 1.7;
+  const waist = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.28, 0.24), uniform);
+  waist.position.y = 0.86;
+  officer.add(waist);
+  const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.3), uniform);
+  shoulders.position.y = 1.42;
+  officer.add(shoulders);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.12, 8), skinMat);
+  neck.position.y = 1.5;
+  officer.add(neck);
+  const face = new THREE.Mesh(new THREE.SphereGeometry(0.21, 10, 8), skinMat);
+  face.position.y = 1.66;
   officer.add(face);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.27, 0.1, 10), uniform);
-  cap.position.y = 1.9;
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.23, 0.1, 10), uniform);
+  cap.position.y = 1.84;
   officer.add(cap);
-  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.26), uniform);
-  brim.position.set(0, 1.86, 0.28);
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.22), uniform);
+  brim.position.set(0, 1.8, 0.24);
   officer.add(brim);
-  const legGeo = new THREE.BoxGeometry(0.2, 0.72, 0.22);
-  legGeo.translate(0, -0.36, 0);
-  const leftLeg = new THREE.Mesh(legGeo, uniform);
-  leftLeg.position.set(-0.15, 0.72, 0);
+  // Two slim legs with a gap, pivoting at the hip.
+  const legShape = new THREE.BoxGeometry(0.17, 0.72, 0.19);
+  legShape.translate(0, -0.36, 0);
+  const leftLeg = new THREE.Mesh(legShape, uniform);
+  leftLeg.position.set(-0.12, 0.72, 0);
   officer.add(leftLeg);
   const rightLeg = leftLeg.clone();
-  rightLeg.position.x = 0.15;
+  rightLeg.position.x = 0.12;
   officer.add(rightLeg);
   // Arms at the sides, one hand resting on the holster.
-  const armGeo = new THREE.BoxGeometry(0.16, 0.6, 0.18);
-  armGeo.translate(0, -0.3, 0);
-  const leftArm = new THREE.Mesh(armGeo, uniform);
-  leftArm.position.set(-0.39, 1.4, 0);
+  const armShape = new THREE.BoxGeometry(0.14, 0.6, 0.16);
+  armShape.translate(0, -0.3, 0);
+  const leftArm = new THREE.Mesh(armShape, uniform);
+  leftArm.position.set(-0.32, 1.38, 0);
   officer.add(leftArm);
   const rightArm = leftArm.clone();
-  rightArm.position.x = 0.39;
+  rightArm.position.x = 0.32;
   rightArm.rotation.x = -0.5;
   officer.add(rightArm);
   // Badge: small gold square on the chest.
   const badge = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), new THREE.MeshBasicMaterial({ color: 0xffd94a }));
-  badge.position.set(-0.14, 1.25, 0.17);
+  badge.position.set(-0.12, 1.24, 0.15);
   officer.add(badge);
   // Uniform details: duty belt, holster, shoulder radio, light-blue
   // shoulder patch, name tag.
-  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.09, 0.36), new THREE.MeshLambertMaterial({ color: 0x14161a }));
-  belt.position.y = 0.78;
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.09, 0.3), new THREE.MeshLambertMaterial({ color: 0x14161a }));
+  belt.position.y = 0.76;
   officer.add(belt);
   const holster = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.14), new THREE.MeshLambertMaterial({ color: 0x1c1e22 }));
-  holster.position.set(0.3, 0.66, 0.1);
+  holster.position.set(0.26, 0.64, 0.1);
   officer.add(holster);
   const radio = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.16, 0.06), new THREE.MeshLambertMaterial({ color: 0x22242a }));
-  radio.position.set(-0.31, 1.32, 0.12);
+  radio.position.set(-0.27, 1.3, 0.12);
   officer.add(radio);
   const patch = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.1), new THREE.MeshBasicMaterial({ color: 0x7ab8e8 }));
-  patch.position.set(-0.32, 1.38, 0.05);
+  patch.position.set(-0.27, 1.36, 0.05);
   patch.rotation.y = -Math.PI / 2;
   officer.add(patch);
   const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.06), new THREE.MeshBasicMaterial({ color: 0xd8d8d8 }));
-  tag.position.set(0.12, 1.28, 0.17);
+  tag.position.set(0.1, 1.26, 0.15);
   officer.add(tag);
   officer.position.set(x, 0, z);
   officer.rotation.y = heading;

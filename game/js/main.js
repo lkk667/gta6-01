@@ -3,6 +3,8 @@
 // screenshot scenes the entry is judged on. The staging helpers put the
 // player, the cars and the cops in exact poses; the harness drives them
 // through ?autostart=1&staging=...
+// A low sun glow hangs over the south-western horizon so the dusk sky
+// has a light source, not just a gradient.
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, WORLD, LANDMARKS, toast, clearToasts } from './state.js';
@@ -17,13 +19,14 @@ import { buildHud, updateHud } from './hud.js';
 import { buildAudio } from './audio.js';
 import { saveGame, loadSave, applySave } from './save.js';
 import { buildInput } from './input.js';
+import { glowTexture } from './textures.js';
 
-let lastSave = 0;
-let ePrev = false;
-let fPrev = false;
-let rPrev = false;
+let lastAutosave = 0;
+let eWas = false;
+let fWas = false;
+let rWas = false;
 
-function buildLights() {
+function setupLights() {
   // Dusk golden hour: warm low sun from the west, pink-orange sky light,
   // long real shadows. Blob shadows (city.js) stay as contact anchors.
   const skyLight = new THREE.HemisphereLight(0xffb08a, 0x5a4038, 0.75);
@@ -69,9 +72,24 @@ function buildLights() {
   S.scene.environmentIntensity = 0.55;
   pmrem.dispose();
   envTexture.dispose();
+  // The low sun itself: one large soft warm glow sprite hanging over the
+  // south-western horizon, additive, so the dusk sky has a visible light
+  // source. It sits just west of the road's southern axis, low, so the
+  // chase camera looking south down road x=0 sees it over the harbor
+  // instead of hidden behind the towers. Fog is off for it — a sun does
+  // not dim with distance the way a building does. Big and bright enough
+  // to read against the sky dome's own baked glow.
+  const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), color: 0xffa050, transparent: true, opacity: 0.95,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  }));
+  sunGlow.scale.set(220, 220, 1);
+  sunGlow.position.set(-40, 35, 440);
+  sunGlow.renderOrder = -5;
+  S.scene.add(sunGlow);
 }
 
-function buildParkedCars() {
+function parkStarterCars() {
   const bays = [
     [-120, -38, Math.PI / 2, 0xd8b83a], [-80, -42, 0, 0x3a7ad8],
     [40, -38, Math.PI / 2, 0xd84a4a], [80, 42, 0, 0x4ad87a],
@@ -85,14 +103,14 @@ function buildParkedCars() {
   spawnParkedCar(-8, 122, 0, 0xb8bcc2, 'truck');
 }
 
-function wireMenu() {
+function hookMenu() {
   const menuEl = document.getElementById('menu');
   const startBtn = document.getElementById('btn-new');
   const resumeBtn = document.getElementById('btn-continue');
   const saved = loadSave();
   if (saved) {
     resumeBtn.style.display = 'inline-block';
-    resumeBtn.textContent = `Continue — $${saved.cash} · ${saved.missionsCompleted} mission${saved.missionsCompleted === 1 ? '' : 's'} done`;
+    resumeBtn.textContent = 'Continue — $' + saved.cash + ' · ' + saved.missionsCompleted + ' mission' + (saved.missionsCompleted === 1 ? '' : 's') + ' done';
   }
   startBtn.addEventListener('click', () => startGame(false));
   resumeBtn.addEventListener('click', () => startGame(true));
@@ -129,9 +147,9 @@ export function startGame(resume) {
 }
 
 // Edge-triggered keys: E enter/exit car, F punch, R reload, 1/2 weapons.
-function handleInteract(dt) {
+function pollInteract(dt) {
   const eDown = !!S.keys.KeyE;
-  if (eDown && !ePrev) {
+  if (eDown && !eWas) {
     if (S.onFoot) {
       const car = nearestCar(S.player.pos.x, S.player.pos.z, 3.5);
       if (car) enterCar(car);
@@ -139,23 +157,23 @@ function handleInteract(dt) {
       exitCar();
     }
   }
-  ePrev = eDown;
+  eWas = eDown;
   const fDown = !!S.keys.KeyF;
-  if (fDown && !fPrev) punch();
-  fPrev = fDown;
+  if (fDown && !fWas) punch();
+  fWas = fDown;
   const rDown = !!S.keys.KeyR;
-  if (rDown && !rPrev) reload();
-  rPrev = rDown;
+  if (rDown && !rWas) reload();
+  rWas = rDown;
   if (S.keys.Digit1) S.player.weapon = 'pistol';
   if (S.keys.Digit2) S.player.weapon = 'fists';
 }
 
-function loop() {
-  requestAnimationFrame(loop);
+function tick() {
+  requestAnimationFrame(tick);
   const step = Math.min(0.05, S.clock.getDelta());
   if (S.mode === 'playing') {
     S.time += step;
-    handleInteract(step);
+    pollInteract(step);
     if (S.onFoot) {
       updatePlayer(step);
       updateCamera(step);
@@ -175,8 +193,8 @@ function loop() {
     }
     updateBlobShadows();
     updateHud();
-    if (S.time - lastSave > 10) {
-      lastSave = S.time;
+    if (S.time - lastAutosave > 10) {
+      lastAutosave = S.time;
       saveGame();
     }
   } else if (S.mode === 'busted') {
@@ -184,23 +202,27 @@ function loop() {
   }
 }
 
-// ---------------------------------------------------------------- staging
+// ------------------------------------------------------------ staging
 
-function autostartGame() {
+function autoBegin() {
   startGame(false);
 }
 
 export function stageChase() {
-  autostartGame();
+  autoBegin();
   S.debug.staged = 'chase';
   // The stolen car starts well up road x=0, close to the harbor, so the
   // SOLMAR HARBOR sign is big and readable in the cover instead of a
-  // distant speck: at the shutter the car has run ~35 m from z=90, leaving
-  // the sign (z=164) about 40 m ahead. Staged at top speed already.
-  const getaway = spawnParkedCar(0, 90, 0, 0xd8b83a);
+  // distant speck. It starts at z=100 (not 90): at 90 the car sat right
+  // on the intersection's stop line and crosswalk, and the white marking
+  // filled the bottom-centre of the frame as a big blank trapezoid. From
+  // z=100 the car has run to about z=114 by the shutter, leaving the
+  // sign (z=164) about 50 m ahead — still big and readable. Staged at
+  // top speed already.
+  const getaway = spawnParkedCar(0, 100, 0, 0xd8b83a);
   const player = S.player;
   player.pos.x = 0;
-  player.pos.z = 90;
+  player.pos.z = 100;
   enterCar(getaway);
   getaway.speed = 34; // 122 km/h at the shutter, even if the held W key
   // takes a frame to register in headless Chrome
@@ -231,9 +253,9 @@ export function stageChase() {
   // stacks on top of the player's car in the frame.
   S.debug.pacing = true;
   const escort = [
-    [-7.5, 100, 34, { side: -7.5, fwd: 10 }],
-    [7.5, 100, 34, { side: 7.5, fwd: 10 }],
-    [-7.5, 88, 34, { side: -7.5, fwd: 0 }],
+    [-7.5, 110, 34, { side: -7.5, fwd: 10 }],
+    [7.5, 110, 34, { side: 7.5, fwd: 10 }],
+    [-7.5, 98, 34, { side: -7.5, fwd: 0 }],
   ];
   for (const [cx, cz, speed, slot] of escort) {
     const cruiser = spawnCruiser(cx, cz);
@@ -246,7 +268,7 @@ export function stageChase() {
 }
 
 export function stageCity() {
-  autostartGame();
+  autoBegin();
   S.debug.staged = 'city';
   const player = S.player;
   player.pos.x = 0;
@@ -281,14 +303,14 @@ export function stageCity() {
   spawnParkedCar(-4, 1.5, 0, 0x3a7ad8);
   // Street life in frame: two pedestrians crossing ahead, one fleeing the
   // shot, and one more crossing close to the camera on the right.
-  stagePeds([[3.5, -8, 0.4], [-4, -6, -0.5], [-1.5, -22, 2.8], [4.5, 3.5, -2.0]]);
+  placeWalkers([[3.5, -8, 0.4], [-4, -6, -0.5], [-1.5, -22, 2.8], [4.5, 3.5, -2.0]]);
   // One shot, flash held open for the camera.
   fireAndHold();
 }
 
 // Move the first few pedestrians to fixed spots (x, z, heading) so a staged
 // shot has street life in frame instead of an empty street.
-function stagePeds(placements) {
+function placeWalkers(placements) {
   for (let i = 0; i < placements.length; i++) {
     const walker = S.peds[i];
     if (!walker) continue;
@@ -301,10 +323,12 @@ function stagePeds(placements) {
 }
 
 export function stageMission() {
-  autostartGame();
+  autoBegin();
   S.debug.staged = 'mission';
   S.debug.longRewardToast = true;
   S.debug.holdReward = true; // keep the reward banner alone for the shot
+  S.debug.freezeTraffic = true; // hold traffic still so no truck wanders
+  // into the frame and parks on the camera during the 8 s wait
   const player = S.player;
   // Face Solmar Tower down a clear sightline: stand on road z=-80 looking
   // east. The tower's south face is 20 m north of that road, and no nearer
@@ -315,12 +339,13 @@ export function stageMission() {
   player.group.position.set(-40, 0, -80);
   player.heading = Math.PI / 2; // facing east, down road z=-80 toward the tower
   S.camYaw = -Math.PI / 2;
-  S.camPitch = -0.15; // camera low, looking up: the 130 m tower fills the frame
+  S.camPitch = -0.38; // camera low, looking up steeply: the 130 m tower fills
+  // the frame and the near pavement drops out of the lower frame
   S.camDist = 8.5;
   // Two walkers further down the road for depth, plus one more in the
   // lower-left foreground, far enough out (about 8 m) that its top stays
   // below the frame centre and it does not hide the player or the tower.
-  stagePeds([[-20, -82, 1.2], [-10, -78, -1.0], [-41.4, -83.5, 0.6]]);
+  placeWalkers([[-20, -82, 1.2], [-10, -78, -1.0], [-41.4, -83.5, 0.6]]);
   debugCompleteMission1();
   // debugCompleteMission1 teleports the player to the park; put them back
   // on the road with the tower in view.
@@ -328,10 +353,12 @@ export function stageMission() {
   player.pos.z = -80;
   player.group.position.set(-40, 0, -80);
   player.heading = Math.PI / 2;
-  // A car parked in the lower-right foreground, about 8 m out, so its
-  // roof stays below the frame centre: it fills the lower frame without
-  // hiding the player, the tower, or the reward banner.
-  spawnParkedCar(-41.4, -77, Math.PI / 2, 0xd84a4a);
+  // A car parked in the lower-right foreground, far enough out (about
+  // 13 m from the camera now, was about 8 m) that it reads as a car in
+  // the street instead of filling the frame: its roof stays below the
+  // frame centre and its plate is fully in frame, not cut off at the
+  // right edge.
+  spawnParkedCar(-37.5, -73.5, Math.PI / 2, 0xd84a4a);
   // The completion banner stands alone; the objective line reports the
   // payout instead of the stale "pick up" instruction at 0 m.
   S.objectiveText = 'Mission 1 complete — $300 earned';
@@ -339,7 +366,7 @@ export function stageMission() {
 }
 
 export function stageFoot() {
-  autostartGame();
+  autoBegin();
   S.debug.staged = 'foot';
   // The mission-start toast sits over the CAFE LUNA sign in headless runs
   // (game time lags real time there, so the 6 s toast is still up at the
@@ -364,7 +391,7 @@ export function stageFoot() {
   // plus one more walker close to the camera on the left, so the lower
   // frame has a person in it instead of bare pavement. (The walker sits
   // just left of the camera's line of sight, close enough to read large.)
-  stagePeds([[-54, -47, -2.2], [-66, -47, 2.2], [-57, -43, 0.6], [-64, -52, 0.2], [-61.5, -33.5, 0.3]]);
+  placeWalkers([[-54, -47, -2.2], [-66, -47, 2.2], [-57, -43, 0.6], [-64, -52, 0.2], [-61.5, -33.5, 0.3]]);
   // A taxi waiting at the kerb in the left foreground, for depth, and a
   // car parked just ahead of the camera on the right, to balance the
   // lower frame. Both sit close to the camera's line of sight.
@@ -387,7 +414,7 @@ export function stageReward() {
   debugCompleteMission1();
 }
 
-function init() {
+function boot() {
   const cv = document.getElementById('game');
   S.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
   S.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -404,7 +431,7 @@ function init() {
   S.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
   S.camera.position.set(0, 6, 12);
   S.clock = new THREE.Clock();
-  buildLights();
+  setupLights();
   buildCity();
   buildPlayer();
   buildTraffic();
@@ -412,8 +439,8 @@ function init() {
   buildAudio();
   buildHud();
   buildInput();
-  buildParkedCars();
-  wireMenu();
+  parkStarterCars();
+  hookMenu();
   window.addEventListener('resize', () => {
     S.camera.aspect = window.innerWidth / window.innerHeight;
     S.camera.updateProjectionMatrix();
@@ -441,9 +468,9 @@ function init() {
     else if (scene === 'city') stageCity();
     else if (scene === 'mission') stageMission();
     else if (scene === 'foot') stageFoot();
-    else autostartGame();
+    else autoBegin();
   }
-  loop();
+  tick();
 }
 
-init();
+boot();

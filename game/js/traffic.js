@@ -1,62 +1,85 @@
 // Solmar City — traffic cars + pedestrians.
 // 28 cars loop the road grid; 40 pedestrians walk the sidewalks, flee
 // gunfire, and dodge cars coming at them instead of standing in the road
-// while a car passes through them.
+// while a car passes through them. The pedestrians are built to read as
+// people — tapered torso, neck, a head that is small next to the
+// shoulders, two slim legs with a gap, arms at the sides — in a spread of
+// heights, so the street is not forty copies of one cut-out.
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, WORLD, dist2, clamp } from './state.js';
 import { makeCar } from './vehicles.js';
 import { attachBlob, resolveCollisions, trafficLightState } from './city.js';
 
-const SHIRT_COLORS = [0xe84a4a, 0x4a8ae8, 0x4ad87a, 0xe8d84a, 0xd87ab8, 0x7ad8d8, 0xf2f2f2, 0x8a5a3a, 0xe87a2a, 0x9a6ad8, 0x3a8a6a, 0xd8d8d8];
-const SKIN_TONES = [0xe8b88a, 0xc88a5a, 0x8a5a34, 0xf2c8a0];
-const PANTS_COLORS = [0x2c2f36, 0x3a4a6a, 0x6a3a3a, 0x4a5a3a, 0x8a7a5a];
+const SHIRTS = [0xe84a4a, 0x4a8ae8, 0x4ad87a, 0xe8d84a, 0xd87ab8, 0x7ad8d8, 0xf2f2f2, 0x8a5a3a, 0xe87a2a, 0x9a6ad8, 0x3a8a6a, 0xd8d8d8];
+const SKINS = [0xe8b88a, 0xc88a5a, 0x8a5a34, 0xf2c8a0];
+const TROUSERS = [0x2c2f36, 0x3a4a6a, 0x6a3a3a, 0x4a5a3a, 0x8a7a5a];
 
-// Build a pedestrian: boxy low-poly figure on a shadow blob.
+// Build a pedestrian: a tapered figure on a shadow blob.
 function buildPedestrian() {
   const g = new THREE.Group();
-  const sample = (list) => list[Math.floor(Math.random() * list.length)];
-  const shirtMat = new THREE.MeshLambertMaterial({ color: sample(SHIRT_COLORS) });
-  const skinMat = new THREE.MeshLambertMaterial({ color: sample(SKIN_TONES) });
-  const pantsMat = new THREE.MeshLambertMaterial({ color: sample(PANTS_COLORS) });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.62, 0.3), shirtMat);
-  torso.position.y = 1.05;
-  torso.castShadow = true;
-  g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 10, 8), skinMat);
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  const shirtMat = new THREE.MeshLambertMaterial({ color: pick(SHIRTS) });
+  const skinMat = new THREE.MeshLambertMaterial({ color: pick(SKINS) });
+  const pantsMat = new THREE.MeshLambertMaterial({ color: pick(TROUSERS) });
+  const shoeMat = new THREE.MeshLambertMaterial({ color: 0x3a3d42 });
+  // Tapered torso: chest wider than the waist, a shoulder bar on top.
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.36, 0.26), shirtMat);
+  chest.position.y = 1.18;
+  chest.castShadow = true;
+  g.add(chest);
+  const waist = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.26, 0.22), shirtMat);
+  waist.position.y = 0.86;
+  g.add(waist);
+  const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.1, 0.28), shirtMat);
+  shoulders.position.y = 1.38;
+  g.add(shoulders);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.12, 8), skinMat);
+  neck.position.y = 1.46;
+  g.add(neck);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), skinMat);
   head.position.y = 1.6;
   head.castShadow = true;
   g.add(head);
   // Varied looks: a cap, hair, or bare head.
   const roll = Math.random();
   if (roll < 0.35) {
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.25, 0.09, 10), new THREE.MeshLambertMaterial({ color: sample(SHIRT_COLORS) }));
-    cap.position.y = 1.79;
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.21, 0.08, 10), new THREE.MeshLambertMaterial({ color: pick(SHIRTS) }));
+    cap.position.y = 1.76;
     g.add(cap);
   } else if (roll < 0.65) {
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x2c2018 }));
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x2c2018 }));
     hair.position.y = 1.62;
     g.add(hair);
   }
-  // Legs pivot at the hip, arms at the shoulder, so the walk swing reads.
-  const legGeo = new THREE.BoxGeometry(0.19, 0.68, 0.2);
-  legGeo.translate(0, -0.34, 0);
-  const leftLeg = new THREE.Mesh(legGeo, pantsMat);
-  leftLeg.position.set(-0.14, 0.68, 0);
+  // Two slim legs with a gap, pivoting at the hip, so the walk swing reads.
+  const legShape = new THREE.BoxGeometry(0.16, 0.68, 0.18);
+  legShape.translate(0, -0.34, 0);
+  const leftLeg = new THREE.Mesh(legShape, pantsMat);
+  leftLeg.position.set(-0.11, 0.68, 0);
   g.add(leftLeg);
   const rightLeg = leftLeg.clone();
-  rightLeg.position.x = 0.14;
+  rightLeg.position.x = 0.11;
   g.add(rightLeg);
-  const armGeo = new THREE.BoxGeometry(0.16, 0.62, 0.18);
-  armGeo.translate(0, -0.31, 0);
-  const leftArm = new THREE.Mesh(armGeo, shirtMat);
-  leftArm.position.set(-0.37, 1.32, 0);
+  // Arms hang at the sides, pivoting at the shoulder.
+  const armShape = new THREE.BoxGeometry(0.13, 0.6, 0.15);
+  armShape.translate(0, -0.3, 0);
+  const leftArm = new THREE.Mesh(armShape, shirtMat);
+  leftArm.position.set(-0.3, 1.32, 0);
   g.add(leftArm);
   const rightArm = leftArm.clone();
-  rightArm.position.x = 0.37;
+  rightArm.position.x = 0.3;
   g.add(rightArm);
+  // Shoes ride on the legs so they swing with the walk.
+  const shoeShape = new THREE.BoxGeometry(0.16, 0.08, 0.26);
+  const shoeL = new THREE.Mesh(shoeShape, shoeMat);
+  shoeL.position.set(0, -0.64, 0.03);
+  leftLeg.add(shoeL);
+  const shoeR = new THREE.Mesh(shoeShape, shoeMat);
+  shoeR.position.set(0, -0.64, 0.03);
+  rightLeg.add(shoeR);
   // Varied height: not every pedestrian is the same cut-out.
-  const s = 0.92 + Math.random() * 0.16;
+  const s = 0.9 + Math.random() * 0.2;
   g.scale.set(s, s, s);
   return { group: g, leftLeg, rightLeg, leftArm, rightArm };
 }
@@ -124,7 +147,7 @@ export function scarePeds(x, z, radius) {
 }
 
 // All cars that can hit a pedestrian: traffic, cruisers, the player's car.
-function nearbyCarThreat(ped) {
+function carThreat(ped) {
   const px = ped.mesh.position.x;
   const pz = ped.mesh.position.z;
   const threats = [];
@@ -219,7 +242,7 @@ export function updatePeds(dt) {
       speed = 4.2;
     }
     // Dodge an approaching car: sidestep perpendicular to its path.
-    const threat = nearbyCarThreat(ped);
+    const threat = carThreat(ped);
     if (threat && threat.d < 8) {
       const sideX = Math.cos(threat.t.heading);
       const sideZ = -Math.sin(threat.t.heading);

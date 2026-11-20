@@ -1,169 +1,206 @@
-// Solmar City — HUD: stars, cash, health, ammo, objective, speed, toasts,
-// live minimap. Stars and cash sit on a translucent panel now;
-// unlit stars are bright-outlined, lit stars glow gold; health and ammo get
-// icons and bigger numbers; the speedometer hides while on foot; minimap
-// police dots are big and flash red/blue.
+// Solmar City — HUD + minimap.
+// Reads S every frame and paints the DOM: wanted stars, cash, objective
+// with distance, health bar, ammo, speedometer (driving only), crosshair
+// (on foot with the pistol), toasts, and a live 150x150 canvas minimap
+// with roads, blocks, ocean, the player arrow, the mission beacon and
+// flashing police dots. All DOM lookups happen once in buildHud.
 
-import { S, WORLD, starsFromHeat } from './state.js';
+import * as THREE from '../vendor/three.module.min.js';
+import { S, WORLD, LANDMARKS, starsFromHeat } from './state.js';
 
-let ui = {};
-let mapCanvas = null;
+let els = null;
 let mapCtx = null;
+let lastStars = -1;
+let lastCash = -1;
+let lastObjective = '';
+let lastHealth = -1;
+let lastAmmo = '';
+let lastSpeed = '';
 
 export function buildHud() {
-  ui = {
+  els = {
     stars: document.getElementById('stars'),
     cash: document.getElementById('cash'),
+    objective: document.getElementById('objective'),
     healthBar: document.getElementById('health-bar'),
     healthText: document.getElementById('health-text'),
-    ammo: document.getElementById('ammo-count'),
-    objective: document.getElementById('objective'),
+    ammoCount: document.getElementById('ammo-count'),
     speed: document.getElementById('speed'),
     toasts: document.getElementById('toasts'),
     crosshair: document.getElementById('crosshair'),
-    hint: document.getElementById('hint'),
-    bust: document.getElementById('busted'),
+    minimap: document.getElementById('minimap'),
   };
-  mapCanvas = document.getElementById('minimap');
-  mapCtx = mapCanvas.getContext('2d');
+  if (els.minimap) mapCtx = els.minimap.getContext('2d');
 }
 
-function starRow(n) {
-  const spans = [];
+function renderStars() {
+  const n = starsFromHeat(S.heat);
+  if (n === lastStars || !els.stars) return;
+  lastStars = n;
+  let html = '';
   for (let i = 0; i < 5; i++) {
-    spans.push(`<span class="star ${i < n ? 'lit' : 'dim'}">★</span>`);
+    html += '<span class="star ' + (i < n ? 'lit' : 'dim') + '">★</span>';
   }
-  return spans.join('');
+  els.stars.innerHTML = html;
+}
+
+function renderCash() {
+  if (S.cash === lastCash || !els.cash) return;
+  lastCash = S.cash;
+  els.cash.textContent = '$' + S.cash;
+}
+
+function renderObjective() {
+  if (!els.objective) return;
+  let text = S.objectiveText || '';
+  if (S.objectiveDist != null) text += ' — ' + Math.round(S.objectiveDist) + ' m';
+  if (text === lastObjective) return;
+  lastObjective = text;
+  els.objective.textContent = text;
+}
+
+function renderHealth() {
+  const hp = Math.max(0, Math.round(S.health));
+  if (hp === lastHealth) return;
+  lastHealth = hp;
+  if (els.healthBar) els.healthBar.style.width = hp + '%';
+  if (els.healthText) els.healthText.textContent = String(hp);
+}
+
+function renderAmmo() {
+  const text = S.magazine + ' / ' + S.reserve;
+  if (text === lastAmmo) return;
+  lastAmmo = text;
+  if (els.ammoCount) els.ammoCount.textContent = text;
+}
+
+function renderSpeed() {
+  if (!els.speed) return;
+  // The speedometer only exists while driving; on foot it is hidden so it
+  // never shows a stale 0 km/h under the character.
+  if (S.onFoot) {
+    if (lastSpeed !== 'hidden') {
+      lastSpeed = 'hidden';
+      els.speed.style.display = 'none';
+    }
+    return;
+  }
+  const text = Math.round(S.speedKmh || 0) + ' km/h';
+  if (text === lastSpeed) return;
+  lastSpeed = text;
+  els.speed.style.display = 'block';
+  els.speed.textContent = text;
+}
+
+function renderCrosshair() {
+  if (!els.crosshair) return;
+  const show = S.mode === 'playing' && S.onFoot && S.player && S.player.weapon === 'pistol';
+  els.crosshair.style.display = show ? 'block' : 'none';
+}
+
+function renderToasts() {
+  if (!els.toasts) return;
+  // Expire toasts whose time is up, unless the staging harness asked the
+  // reward banner to be held for the screenshot.
+  const alive = [];
+  for (const t of S.toasts) {
+    if (t.until != null && S.time > t.until && !S.debug.holdReward) continue;
+    alive.push(t);
+  }
+  if (alive.length !== S.toasts.length) S.toasts.length = 0, S.toasts.push(...alive);
+  let html = '';
+  for (const t of S.toasts) {
+    html += '<div class="toast"><b>' + t.text + '</b>' + (t.sub ? '<span>' + t.sub + '</span>' : '') + '</div>';
+  }
+  if (els.toasts._last !== html) {
+    els.toasts._last = html;
+    els.toasts.innerHTML = html;
+  }
+}
+
+// Map world (x,z) in [-190,190] onto the 150x150 minimap canvas.
+function mapX(x) { return ((x + WORLD.half) / (WORLD.half * 2)) * 150; }
+function mapY(z) { return ((z + WORLD.half) / (WORLD.half * 2)) * 150; }
+
+function drawMinimap() {
+  if (!mapCtx) return;
+  const g = mapCtx;
+  // Land + ocean. The south strip (z > 170) is the beach and the sea.
+  g.fillStyle = '#101418';
+  g.fillRect(0, 0, 150, 150);
+  g.fillStyle = '#1d4a6a';
+  g.fillRect(0, mapY(170), 150, 150 - mapY(170));
+  // City blocks in four muted dusk colours, so the map reads as streets
+  // rather than a blank grid.
+  const blockCols = ['#2a2f3a', '#33302e', '#2e3330', '#352e33'];
+  let bi = 0;
+  for (const rx of WORLD.roads) {
+    for (const rz of WORLD.roads) {
+      const bx = rx + 20, bz = rz + 20;
+      if (bz >= 150) continue;
+      g.fillStyle = blockCols[bi++ % blockCols.length];
+      g.fillRect(mapX(bx - 15), mapY(bz - 15), 30 / 380 * 150, 30 / 380 * 150);
+    }
+  }
+  // Roads, thick enough to read at a glance.
+  g.strokeStyle = '#6a7078';
+  g.lineWidth = 5;
+  for (const r of WORLD.roads) {
+    g.beginPath(); g.moveTo(mapX(r), 0); g.lineTo(mapX(r), 150); g.stroke();
+    g.beginPath(); g.moveTo(0, mapY(r)); g.lineTo(150, mapY(r)); g.stroke();
+  }
+  // Mission beacon: a gold dot with a glow ring.
+  if (S.beacon && S.beacon.position) {
+    const bx = mapX(S.beacon.position.x);
+    const by = mapY(S.beacon.position.z);
+    g.fillStyle = 'rgba(255, 217, 74, 0.35)';
+    g.beginPath(); g.arc(bx, by, 7, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#ffd94a';
+    g.beginPath(); g.arc(bx, by, 3.5, 0, Math.PI * 2); g.fill();
+  }
+  // Police cruisers: flashing red/blue dots with a white ring.
+  const flashRed = Math.floor(S.time * 3) % 2 === 0;
+  for (const c of S.cruisers || []) {
+    const cx = mapX(c.mesh.position.x);
+    const cy = mapY(c.mesh.position.z);
+    g.fillStyle = flashRed ? '#ff2a2a' : '#2a7aff';
+    g.beginPath(); g.arc(cx, cy, 3, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 1;
+    g.beginPath(); g.arc(cx, cy, 4.5, 0, Math.PI * 2); g.stroke();
+  }
+  // The player: a gold arrow pointing along the heading.
+  if (S.player) {
+    const px = mapX(S.player.pos.x);
+    const py = mapY(S.player.pos.z);
+    const hd = S.player.heading || 0;
+    g.save();
+    g.translate(px, py);
+    // Canvas y is down and z is south, so the heading rotates clockwise
+    // from north: angle = PI - heading maps the world facing onto canvas.
+    g.rotate(Math.PI - hd);
+    g.fillStyle = '#ffd94a';
+    g.beginPath();
+    g.moveTo(0, -6); g.lineTo(4.5, 5); g.lineTo(-4.5, 5); g.closePath();
+    g.fill();
+    g.restore();
+  }
+  // Compass north at the top centre.
+  g.fillStyle = '#ffd94a';
+  g.font = 'bold 11px Arial, sans-serif';
+  g.textAlign = 'center';
+  g.fillText('N', 75, 12);
 }
 
 export function updateHud() {
-  if (!ui.stars) return;
-  const wanted = starsFromHeat(S.heat);
-  ui.stars.innerHTML = starRow(wanted);
-  ui.cash.textContent = '$' + S.cash;
-  ui.healthBar.style.width = Math.max(0, S.health) + '%';
-  ui.healthText.textContent = Math.round(S.health);
-  ui.ammo.textContent = `${S.magazine} / ${S.reserve}`;
-  const dist = S.objectiveDist === null || S.objectiveDist === undefined
-    ? ''
-    : ` — ${Math.round(S.objectiveDist)}m`;
-  ui.objective.textContent = S.objectiveText + dist;
-  // Speedometer only while driving.
-  if (S.onFoot) {
-    ui.speed.style.display = 'none';
-  } else {
-    ui.speed.style.display = 'block';
-    ui.speed.textContent = `${Math.round(S.speedKmh)} km/h`;
-  }
-  // Crosshair only on foot with the pistol.
-  const showCross = S.mode === 'playing' && S.onFoot && S.player && S.player.weapon === 'pistol';
-  ui.crosshair.style.display = showCross ? 'block' : 'none';
-  // Toasts, newest last.
-  const now = S.time;
-  S.toasts = S.toasts.filter((t) => t.until > now);
-  let html = '';
-  for (const t of S.toasts) {
-    html += `<div class="toast"><b>${t.text}</b>${t.sub ? `<span>${t.sub}</span>` : ''}</div>`;
-  }
-  ui.toasts.innerHTML = html;
-  // Busted overlay.
-  ui.bust.style.display = S.mode === 'busted' ? 'flex' : 'none';
-  drawMinimap(wanted);
-}
-
-function drawMinimap(stars) {
-  const ctx = mapCtx;
-  const size = 150;
-  const k = size / (WORLD.size + 40);
-  const project = (x, z) => [(x + WORLD.half + 20) * k, (z + WORLD.half + 20) * k];
-  ctx.clearRect(0, 0, size, size);
-  ctx.fillStyle = '#101418';
-  ctx.fillRect(0, 0, size, size);
-  // Ocean + sand at the south edge (deep dusk blue water).
-  const [, oceanY] = project(0, WORLD.half);
-  ctx.fillStyle = '#2a4a7a';
-  ctx.fillRect(0, oceanY, size, size - oceanY);
-  ctx.fillStyle = '#e8d8a0';
-  ctx.fillRect(0, oceanY - 4, size, 4);
-  // City blocks first, then roads over them, so roads read as streets.
-  // Blocks get slightly varied dusk colours instead of one flat grey.
-  const shades = ['#2e3440', '#38343e', '#33302e', '#2e3a40'];
-  for (const rx of WORLD.roads) {
-    for (const rz of WORLD.roads) {
-      const [bx, by] = project(rx + 5, rz + 5);
-      const shade = Math.abs((rx + rz) / 40) % shades.length;
-      ctx.fillStyle = shades[shade];
-      ctx.fillRect(bx, by, 30 * k, 30 * k);
-    }
-  }
-  ctx.strokeStyle = '#aab3c3';
-  ctx.lineWidth = 5;
-  for (const r of WORLD.roads) {
-    const [x1, y1] = project(r, -WORLD.half);
-    const [x2, y2] = project(r, WORLD.half);
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    const [ax, ay] = project(-WORLD.half, r);
-    const [bx, by] = project(WORLD.half, r);
-    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
-  }
-  // Compass: the map is north-up, so N sits at the top edge.
-  ctx.font = 'bold 12px Arial, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-  ctx.strokeText('N', size / 2, 3);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText('N', size / 2, 3);
-  // Park.
-  const [pkx, pky] = project(25, 25);
-  ctx.fillStyle = '#4c8a3c';
-  ctx.fillRect(pkx, pky, 30 * k, 30 * k);
-  // Mission beacon: big pulsing gold dot with a glow halo.
-  if (S.beacon && S.beacon.group.visible) {
-    const [bx, by] = project(S.beacon.target.x, S.beacon.target.z);
-    const pulse = 5 + Math.sin(S.time * 4) * 1.5;
-    ctx.save();
-    ctx.shadowColor = '#ffd94a';
-    ctx.shadowBlur = 10;
-    ctx.fillStyle = '#ffd94a';
-    ctx.beginPath(); ctx.arc(bx, by, pulse, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    ctx.strokeStyle = '#fff2b8';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(bx, by, pulse + 2.5, 0, Math.PI * 2); ctx.stroke();
-  }
-  // Cash drops: green dots.
-  if (S.dropSpots) {
-    ctx.fillStyle = '#4ad87a';
-    for (const d of S.dropSpots) {
-      if (d.taken) continue;
-      const [dx, dy] = project(d.x, d.z);
-      ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI * 2); ctx.fill();
-    }
-  }
-  // Police cruisers: BIG flashing red/blue dots.
-  const redPhase = Math.sin(S.time * 7) > 0;
-  for (const c of S.cruisers) {
-    const [cx, cy] = project(c.mesh.position.x, c.mesh.position.z);
-    ctx.fillStyle = redPhase ? '#ff2a2a' : '#2a6aff';
-    ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.stroke();
-  }
-  // Player arrow.
-  const [px, py] = project(S.player.pos.x, S.player.pos.z);
-  ctx.save();
-  ctx.translate(px, py);
-  ctx.rotate(S.player.heading);
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.moveTo(0, -7);
-  ctx.lineTo(5, 6);
-  ctx.lineTo(-5, 6);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-  void stars;
+  if (!els) return;
+  renderStars();
+  renderCash();
+  renderObjective();
+  renderHealth();
+  renderAmmo();
+  renderSpeed();
+  renderCrosshair();
+  renderToasts();
+  drawMinimap();
 }
