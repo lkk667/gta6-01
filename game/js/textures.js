@@ -1,370 +1,364 @@
-// Solmar City — procedural surface library.
-// Every wall, road and pavement in the city is painted from canvas
-// textures made here at boot. No image files and no network: the same
-// fixed seeds paint the same surfaces on every run, so a screenshot taken
-// today matches one taken tomorrow. The variation lives in the paint —
-// worn lane paint, stained and cracked pavers, facades whose windows are
-// not all the same size, a few balconies and air-conditioner boxes — so
-// the streets stop reading as one flat repeating tile.
+// Solmar City — procedural canvas textures: asphalt, sidewalks,
+// facades, glow, wheels, plates. Everything is drawn in code, so the
+// game makes zero network requests for art.
+// The look is soft, not pixelated: every surface uses smooth gradients
+// and lightly blurred noise instead of hard square speckles, and the
+// canvases are 1024x1024 so the detail holds up close. A window at
+// dusk is a sky gradient — orange at the bottom fading to deep blue —
+// with the lit ones glowing warm, so the facades catch the sunset
+// instead of looking flat. Filters are Linear + LinearMipmapLinear
+// with anisotropy 8, so the textures stay smooth at glancing angles.
 
 import * as THREE from '../vendor/three.module.min.js';
 
-// Deterministic generator (a small LCG) so the noise is stable per run.
-function rand(seed) {
-  let s = seed >>> 0;
-  return function () {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
+const SIZE = 1024;
+
+// A tiny seeded generator (LCG) so the noise is stable per run: the
+// same seed paints the same surfaces every time, so a screenshot taken
+// today matches one taken tomorrow.
+let seedState = 987654321;
+function dice() {
+  seedState = (Math.imul(seedState, 1664525) + 1013904223) >>> 0;
+  return seedState / 4294967296;
 }
 
-function newCanvas(w, h) {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  return [c, c.getContext('2d')];
+// A canvas with a 2d context, ready to paint on.
+function makeCanvas(w, h) {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  return [canvas, canvas.getContext('2d')];
 }
 
-function toTex(canvas, opts) {
-  const o = opts || {};
-  const t = new THREE.CanvasTexture(canvas);
-  t.wrapS = THREE.RepeatWrapping;
-  t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(o.rx === undefined ? 1 : o.rx, o.ry === undefined ? 1 : o.ry);
-  if (o.srgb !== false) t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = o.aniso === undefined ? 8 : o.aniso;
-  return t;
+// Hex colour -> rgba() string with the given alpha, so a gradient can
+// fade from the colour to transparent instead of to transparent black.
+function hexWithAlpha(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
 }
 
-const memo = {};
+// A soft round blotch: a radial gradient that is the colour at full
+// strength in the centre and fades to nothing at the edge. This is the
+// replacement for the old hard 2x2/3x3 fillRect speckles everywhere.
+function softSpot(pen, x, y, radius, colour, alpha) {
+  const grad = pen.createRadialGradient(x, y, 0, x, y, radius);
+  grad.addColorStop(0, hexWithAlpha(colour, alpha));
+  grad.addColorStop(1, hexWithAlpha(colour, 0));
+  pen.fillStyle = grad;
+  pen.beginPath();
+  pen.arc(x, y, radius, 0, Math.PI * 2);
+  pen.fill();
+}
 
-// ------------------------------------------------------------ road surface
+// Wrap a painted canvas as a texture: linear filtering both ways and
+// anisotropy 8, so it stays smooth at a glancing angle.
+function wrapTex(canvas, repeatX, repeatY) {
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.anisotropy = 8;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeatX || 1, repeatY || 1);
+  return tex;
+}
 
-// Warm dusk asphalt. The base is speckled, the two wheel tracks are
-// polished a little glossier by traffic, hairline cracks wander across
-// the tile, and a couple of darker repair patches break the expanse.
-// The centre dash is worn: faded, and broken where tyres have scrubbed
-// the paint away. A paired roughness canvas carries the same wear.
 export function asphaltMaps() {
-  if (memo.asphalt) return memo.asphalt;
-  const rnd = rand(9101);
-  const [c, g] = newCanvas(512, 512);
-  const [rc, rg] = newCanvas(512, 512);
-  g.fillStyle = '#2e3138';
-  g.fillRect(0, 0, 512, 512);
-  rg.fillStyle = '#c9c9c9';
-  rg.fillRect(0, 0, 512, 512);
-  for (let i = 0; i < 15000; i++) {
-    const x = rnd() * 512;
-    const y = rnd() * 512;
-    const v = 36 + Math.floor(rnd() * 26);
-    g.fillStyle = 'rgb(' + v + ',' + (v + 1) + ',' + (v + 5) + ')';
-    g.fillRect(x, y, 2, 2);
-    const rv = 150 + Math.floor(rnd() * 90);
-    rg.fillStyle = 'rgb(' + rv + ',' + rv + ',' + rv + ')';
-    rg.fillRect(x, y, 2, 2);
+  const [canvas, pen] = makeCanvas(SIZE, SIZE);
+  const [roughCanvas, rough] = makeCanvas(SIZE, SIZE);
+  // The base is a vertical gradient, darker at the edges, so the road
+  // reads as one surface with a worn centre instead of a flat slab.
+  const base = pen.createLinearGradient(0, 0, 0, SIZE);
+  base.addColorStop(0, '#23262b');
+  base.addColorStop(0.5, '#2e3238');
+  base.addColorStop(1, '#23262b');
+  pen.fillStyle = base;
+  pen.fillRect(0, 0, SIZE, SIZE);
+  const roughBase = rough.createLinearGradient(0, 0, 0, SIZE);
+  roughBase.addColorStop(0, '#8a8a8a');
+  roughBase.addColorStop(0.5, '#a8a8a8');
+  roughBase.addColorStop(1, '#8a8a8a');
+  rough.fillStyle = roughBase;
+  rough.fillRect(0, 0, SIZE, SIZE);
+  // Wear: soft light and dark blotches scattered across the surface,
+  // never hard square noise.
+  for (let i = 0; i < 90; i += 1) {
+    const x = dice() * SIZE;
+    const y = dice() * SIZE;
+    const r = 20 + dice() * 70;
+    softSpot(pen, x, y, r, dice() < 0.5 ? '#3a3e45' : '#1a1c20', 0.35);
+    softSpot(rough, x, y, r, dice() < 0.5 ? '#c8c8c8' : '#707070', 0.5);
   }
-  // Polished bands where the tyres run.
-  g.fillStyle = 'rgba(18,20,24,0.25)';
-  g.fillRect(112, 0, 46, 512);
-  g.fillRect(354, 0, 46, 512);
-  rg.fillStyle = 'rgba(105,105,105,0.4)';
-  rg.fillRect(112, 0, 46, 512);
-  rg.fillRect(354, 0, 46, 512);
-  // A couple of darker repair patches, edges feathered by hand.
-  for (let k = 0; k < 3; k++) {
-    const px = rnd() * 420;
-    const py = rnd() * 420;
-    const pw = 60 + rnd() * 50;
-    const ph = 40 + rnd() * 60;
-    g.fillStyle = 'rgba(20,22,26,0.55)';
-    g.fillRect(px, py, pw, ph);
-    g.fillStyle = 'rgba(20,22,26,0.25)';
-    g.fillRect(px - 4, py - 4, pw + 8, ph + 8);
-    rg.fillStyle = 'rgba(90,90,90,0.5)';
-    rg.fillRect(px, py, pw, ph);
+  // Polished tyre bands where the wheels run: two soft horizontal
+  // streaks, slightly lighter and smoother (lower roughness) than the
+  // rest, so the dusk sun catches them.
+  for (const bandY of [SIZE * 0.28, SIZE * 0.72]) {
+    const band = pen.createLinearGradient(0, bandY - 60, 0, bandY + 60);
+    band.addColorStop(0, 'rgba(0,0,0,0)');
+    band.addColorStop(0.5, 'rgba(120,130,145,0.22)');
+    band.addColorStop(1, 'rgba(0,0,0,0)');
+    pen.fillStyle = band;
+    pen.fillRect(0, bandY - 60, SIZE, 120);
+    const roughBand = rough.createLinearGradient(0, bandY - 60, 0, bandY + 60);
+    roughBand.addColorStop(0, 'rgba(0,0,0,0)');
+    roughBand.addColorStop(0.5, 'rgba(40,40,40,0.5)');
+    roughBand.addColorStop(1, 'rgba(0,0,0,0)');
+    rough.fillStyle = roughBand;
+    rough.fillRect(0, bandY - 60, SIZE, 120);
   }
-  // Hairline cracks wandering down the tile.
-  g.strokeStyle = 'rgba(12,12,16,0.5)';
-  g.lineWidth = 1.2;
-  for (let k = 0; k < 7; k++) {
-    let x = rnd() * 512;
-    let y = rnd() * 512;
-    g.beginPath();
-    g.moveTo(x, y);
-    for (let s = 0; s < 8; s++) {
-      x += (rnd() - 0.5) * 42;
-      y += rnd() * 36;
-      g.lineTo(x, y);
+  // Repair patches: dark rectangles with soft feathered edges, not
+  // hard-edged boxes, plus a few hairline cracks.
+  for (let i = 0; i < 5; i += 1) {
+    const px = dice() * SIZE * 0.8;
+    const py = dice() * SIZE * 0.8;
+    const pw = 120 + dice() * 160;
+    const ph = 80 + dice() * 120;
+    pen.filter = 'blur(2px)';
+    pen.fillStyle = 'rgba(14,15,18,0.55)';
+    pen.fillRect(px, py, pw, ph);
+    pen.filter = 'none';
+    rough.fillStyle = 'rgba(60,60,60,0.6)';
+    rough.fillRect(px, py, pw, ph);
+  }
+  for (let i = 0; i < 12; i += 1) {
+    pen.strokeStyle = 'rgba(10,10,12,0.5)';
+    pen.lineWidth = 2;
+    pen.beginPath();
+    let cx = dice() * SIZE;
+    let cy = dice() * SIZE;
+    pen.moveTo(cx, cy);
+    for (let j = 0; j < 4; j += 1) {
+      cx += (dice() - 0.5) * 120;
+      cy += (dice() - 0.5) * 60;
+      pen.lineTo(cx, cy);
     }
-    g.stroke();
+    pen.stroke();
   }
-  // Centre dash, worn: fainter than fresh paint, and scrubbed away in
-  // two places where the wheels cross it.
-  g.fillStyle = 'rgba(216,200,144,0.62)';
-  g.fillRect(248, 64, 16, 176);
-  g.fillStyle = '#2e3138';
-  g.fillRect(248, 108, 16, 22);
-  g.fillRect(248, 186, 16, 14);
-  // Edge lines, also faded.
-  g.fillStyle = 'rgba(200,200,190,0.4)';
-  g.fillRect(10, 0, 12, 512);
-  g.fillRect(490, 0, 12, 512);
-  memo.asphalt = {
-    map: toTex(c),
-    roughnessMap: toTex(rc, { srgb: false }),
-  };
-  return memo.asphalt;
+  // Lane markings: a dashed centre line and two solid edge lines. The
+  // dashes are worn (alpha 0.75) and the edges are feathered, so they
+  // look painted and weathered rather than pasted on.
+  const midY = SIZE / 2;
+  pen.filter = 'blur(1.5px)';
+  pen.fillStyle = 'rgba(230,225,190,0.75)';
+  for (let x = 0; x < SIZE; x += 128) {
+    pen.fillRect(x, midY - 5, 64, 10);
+  }
+  pen.fillStyle = 'rgba(230,225,190,0.55)';
+  pen.fillRect(0, 30, SIZE, 6);
+  pen.fillRect(0, SIZE - 36, SIZE, 6);
+  pen.filter = 'none';
+  return { map: wrapTex(canvas), roughnessMap: wrapTex(roughCanvas) };
 }
 
-// ------------------------------------------------------------ pavement
-
-// Paver tiles with a lived-in spread: most tiles are the warm base tone,
-// a share are darker from damp and wear, a few carry a stain blotch, and
-// one or two in a run are cracked right across. The joints stay dark so
-// the grid reads, but no two tiles are quite the same.
 export function sidewalkMap() {
-  if (memo.sidewalk) return memo.sidewalk;
-  const rnd = rand(9102);
-  const [c, g] = newCanvas(512, 512);
-  g.fillStyle = '#8b8378';
-  g.fillRect(0, 0, 512, 512);
-  const tile = 64;
-  for (let y = 0; y < 512; y += tile) {
-    for (let x = 0; x < 512; x += tile) {
-      const roll = rnd();
-      let d = Math.floor((rnd() - 0.5) * 20);
-      if (roll < 0.16) d -= 26; // darker, worn tile
-      g.fillStyle = 'rgb(' + (142 + d) + ',' + (134 + d) + ',' + (122 + d) + ')';
-      g.fillRect(x + 2, y + 2, tile - 4, tile - 4);
-      if (roll >= 0.16 && roll < 0.24) {
-        // Stain blotch: a soft dark bloom in the middle of the tile.
-        const sx = x + 14 + rnd() * 22;
-        const sy = y + 14 + rnd() * 22;
-        const sr = 8 + rnd() * 12;
-        const grad = g.createRadialGradient(sx, sy, 1, sx, sy, sr);
-        grad.addColorStop(0, 'rgba(40,34,28,0.5)');
-        grad.addColorStop(1, 'rgba(40,34,28,0)');
-        g.fillStyle = grad;
-        g.fillRect(sx - sr, sy - sr, sr * 2, sr * 2);
-      }
-      if (roll >= 0.24 && roll < 0.29) {
-        // Crack right across the tile, jagged.
-        g.strokeStyle = 'rgba(38,32,26,0.65)';
-        g.lineWidth = 1.6;
-        let cx = x + rnd() * 20;
-        let cy = y + 2;
-        g.beginPath();
-        g.moveTo(cx, cy);
-        while (cy < y + tile - 2) {
-          cx += (rnd() - 0.5) * 16;
-          cy += 8 + rnd() * 10;
-          g.lineTo(cx, cy);
-        }
-        g.stroke();
-      }
+  const [canvas, pen] = makeCanvas(SIZE, SIZE);
+  // A warm base with a gentle vertical gradient, so the pavement reads
+  // as one surface instead of a flat slab.
+  const base = pen.createLinearGradient(0, 0, 0, SIZE);
+  base.addColorStop(0, '#a89a7f');
+  base.addColorStop(1, '#96886f');
+  pen.fillStyle = base;
+  pen.fillRect(0, 0, SIZE, SIZE);
+  // Each tile drifts a little in tone, and a few soft stains sit on the
+  // surface — all radial fades, never hard square speckles.
+  for (let ty = 0; ty < 4; ty += 1) {
+    for (let tx = 0; tx < 4; tx += 1) {
+      const drift = dice() * 0.08 - 0.04;
+      const tone = drift > 0 ? 'rgba(255,255,255,' + drift.toFixed(2) + ')' : 'rgba(0,0,0,' + (-drift).toFixed(2) + ')';
+      pen.fillStyle = tone;
+      pen.fillRect(tx * 256, ty * 256, 256, 256);
     }
   }
-  g.strokeStyle = 'rgba(52,47,43,0.6)';
-  g.lineWidth = 2;
-  for (let i = 0; i <= 512; i += tile) {
-    g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 512); g.stroke();
-    g.beginPath(); g.moveTo(0, i); g.lineTo(512, i); g.stroke();
+  for (let i = 0; i < 24; i += 1) {
+    softSpot(pen, dice() * SIZE, dice() * SIZE, 30 + dice() * 80, dice() < 0.5 ? '#7a6a50' : '#c8b898', 0.3);
   }
-  for (let i = 0; i < 4200; i++) {
-    g.fillStyle = rnd() > 0.5 ? 'rgba(255,250,240,0.06)' : 'rgba(28,24,20,0.09)';
-    g.fillRect(rnd() * 512, rnd() * 512, 2, 2);
+  // A few hairline cracks, then the tile joints.
+  for (let i = 0; i < 8; i += 1) {
+    pen.strokeStyle = 'rgba(60,50,35,0.4)';
+    pen.lineWidth = 1.5;
+    pen.beginPath();
+    let cx = dice() * SIZE;
+    let cy = dice() * SIZE;
+    pen.moveTo(cx, cy);
+    for (let j = 0; j < 3; j += 1) {
+      cx += (dice() - 0.5) * 100;
+      cy += (dice() - 0.5) * 100;
+      pen.lineTo(cx, cy);
+    }
+    pen.stroke();
   }
-  memo.sidewalk = toTex(c);
-  return memo.sidewalk;
+  pen.strokeStyle = 'rgba(70,60,45,0.6)';
+  pen.lineWidth = 4;
+  for (let i = 0; i <= 4; i += 1) {
+    pen.beginPath();
+    pen.moveTo(i * 256, 0);
+    pen.lineTo(i * 256, SIZE);
+    pen.stroke();
+    pen.beginPath();
+    pen.moveTo(0, i * 256);
+    pen.lineTo(SIZE, i * 256);
+    pen.stroke();
+  }
+  return wrapTex(canvas);
 }
 
-// ------------------------------------------------------------ facades
-
-const FACADE_STYLES = [
-  { wall: '#c7b8a1', trim: '#9e8f7a', glass: '#263445', cols: 6, rows: 10, rough: 0.8, metal: 0.05 },
-  { wall: '#4a5a6a', trim: '#2f3c4a', glass: '#1d2d3e', cols: 8, rows: 12, rough: 0.3, metal: 0.45 },
-  { wall: '#d6a98e', trim: '#b58468', glass: '#2a3340', cols: 6, rows: 8, rough: 0.75, metal: 0.08 },
-  { wall: '#7e7975', trim: '#595552', glass: '#222a33', cols: 5, rows: 8, rough: 0.85, metal: 0.05 },
-  { wall: '#a85848', trim: '#7a3a30', glass: '#2a3340', cols: 6, rows: 9, rough: 0.8, metal: 0.05 },
+// Facade styles, each with a wall colour, a trim colour and a window
+// layout. Windows are the dusk sky in miniature: a vertical gradient
+// from warm orange at the bottom to deep blue at the top, so they
+// reflect the sunset. Lit windows glow warm, and that glow is baked
+// into the emissive map too, so they shine at dusk.
+const STYLES = [
+  { wall: '#8a6a4a', trim: '#6a4a30', cols: 4, rows: 5 },
+  { wall: '#a08a6a', trim: '#7a6248', cols: 5, rows: 6 },
+  { wall: '#7a5a6a', trim: '#5a3a4a', cols: 4, rows: 6 },
+  { wall: '#6a7a8a', trim: '#4a5a6a', cols: 5, rows: 5 },
+  { wall: '#9a4a3a', trim: '#7a3226', cols: 4, rows: 5 },
 ];
 
-// One facade style: a window grid over a grainy wall, with a matching
-// emissive canvas where only the lit windows glow. The windows are not
-// all the same size — a few are wider or taller than their neighbours —
-// and a few carry a balcony slab with a railing, or a grey air-conditioner
-// box tucked under the sill. About two in five windows are lit, warm gold
-// or cool white, so the face glows at dusk instead of reading flat.
 export function facadeMaps(styleIdx) {
-  const key = 'facade' + (styleIdx % FACADE_STYLES.length);
-  if (memo[key]) return memo[key];
-  const st = FACADE_STYLES[styleIdx % FACADE_STYLES.length];
-  const rnd = rand(9200 + styleIdx);
-  const [c, g] = newCanvas(512, 512);
-  const [ec, eg] = newCanvas(512, 512);
-  g.fillStyle = st.wall;
-  g.fillRect(0, 0, 512, 512);
-  eg.fillStyle = '#000000';
-  eg.fillRect(0, 0, 512, 512);
-  for (let i = 0; i < 3200; i++) {
-    g.fillStyle = rnd() > 0.5 ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0.05)';
-    g.fillRect(rnd() * 512, rnd() * 512, 3, 3);
+  const style = STYLES[styleIdx % STYLES.length];
+  const [canvas, pen] = makeCanvas(SIZE, SIZE);
+  const [emitCanvas, emit] = makeCanvas(SIZE, SIZE);
+  // The wall: a vertical wash, lighter at the top where the sunset
+  // catches it, with soft tonal drift instead of hard square speckles.
+  const wash = pen.createLinearGradient(0, 0, 0, SIZE);
+  wash.addColorStop(0, style.wall);
+  wash.addColorStop(1, style.trim);
+  pen.fillStyle = wash;
+  pen.fillRect(0, 0, SIZE, SIZE);
+  emit.fillStyle = '#000000';
+  emit.fillRect(0, 0, SIZE, SIZE);
+  for (let i = 0; i < 40; i += 1) {
+    softSpot(pen, dice() * SIZE, dice() * SIZE, 40 + dice() * 90, dice() < 0.5 ? style.trim : style.wall, 0.3);
   }
-  const cw = 512 / st.cols;
-  const rh = 512 / st.rows;
-  for (let r = 0; r < st.rows; r++) {
-    g.fillStyle = st.trim;
-    g.fillRect(0, r * rh, 512, 4);
-    for (let col = 0; col < st.cols; col++) {
-      // Windows vary: most are the grid size, some are wider or taller.
-      let ww = cw * 0.64;
-      let wh = rh * 0.62;
-      const vw = rnd();
-      if (vw < 0.12) ww *= 1.35;
-      else if (vw < 0.2) wh *= 1.3;
-      const wx = col * cw + (cw - ww) / 2;
-      const wy = r * rh + (rh - wh) / 2;
-      g.fillStyle = st.trim;
-      g.fillRect(wx - 2, wy - 2, ww + 4, wh + 4);
-      g.fillStyle = st.glass;
-      g.fillRect(wx, wy, ww, wh);
-      g.fillStyle = 'rgba(255,255,255,0.12)';
-      g.fillRect(wx, wy + wh * 0.48, ww, 2);
-      // Balcony slab + railing under some upper-floor windows.
-      if (r > 0 && rnd() < 0.12) {
-        g.fillStyle = 'rgba(210,200,185,0.9)';
-        g.fillRect(wx - 4, wy + wh + 2, ww + 8, 5);
-        g.strokeStyle = 'rgba(40,36,32,0.8)';
-        g.lineWidth = 1.5;
-        for (let b = 0; b <= 4; b++) {
-          const bx = wx - 4 + ((ww + 8) / 4) * b;
-          g.beginPath(); g.moveTo(bx, wy + wh + 7); g.lineTo(bx, wy + wh + 18); g.stroke();
-        }
-        g.beginPath(); g.moveTo(wx - 4, wy + wh + 18); g.lineTo(wx + ww + 4, wy + wh + 18); g.stroke();
-      } else if (rnd() < 0.15) {
-        // Air-conditioner box under the sill.
-        g.fillStyle = '#9aa0a8';
-        g.fillRect(wx + ww * 0.2, wy + wh + 3, ww * 0.5, 10);
-        g.fillStyle = 'rgba(40,40,44,0.7)';
-        g.fillRect(wx + ww * 0.2, wy + wh + 6, ww * 0.5, 2);
-      }
-      if (rnd() < 0.42) {
-        const warm = rnd() < 0.72;
-        const lit = warm ? '#ffcf86' : '#cfe8ff';
-        g.fillStyle = lit;
-        g.fillRect(wx + 2, wy + 2, ww - 4, wh - 4);
-        eg.fillStyle = warm ? '#ffb85c' : '#a8d4ff';
-        eg.fillRect(wx + 2, wy + 2, ww - 4, wh - 4);
+  // Windows in a grid. Unlit ones are the dusk sky gradient; lit ones
+  // are a warm radial glow, and the glow is drawn into the emissive
+  // map as well so they shine.
+  const margin = 90;
+  const winW = (SIZE - margin * 2 - (style.cols - 1) * 40) / style.cols;
+  const winH = (SIZE - margin * 2 - (style.rows - 1) * 36) / style.rows;
+  for (let r = 0; r < style.rows; r += 1) {
+    for (let c = 0; c < style.cols; c += 1) {
+      const x = margin + c * (winW + 40);
+      const y = margin + r * (winH + 36);
+      // The sky reflected in the glass: orange at the bottom, deep
+      // blue at the top.
+      const sky = pen.createLinearGradient(0, y + winH, 0, y);
+      sky.addColorStop(0, '#ff9a3a');
+      sky.addColorStop(0.5, '#c86a8a');
+      sky.addColorStop(1, '#2a3a6a');
+      pen.fillStyle = sky;
+      pen.fillRect(x, y, winW, winH);
+      // A frame around each window.
+      pen.strokeStyle = style.trim;
+      pen.lineWidth = 6;
+      pen.strokeRect(x, y, winW, winH);
+      // About 42% of the windows are lit: a warm radial glow in both
+      // the colour map and the emissive map.
+      if (dice() < 0.42) {
+        const glow = pen.createRadialGradient(x + winW / 2, y + winH / 2, 4, x + winW / 2, y + winH / 2, winW * 0.7);
+        glow.addColorStop(0, 'rgba(255,214,130,0.95)');
+        glow.addColorStop(1, 'rgba(255,180,80,0.25)');
+        pen.fillStyle = glow;
+        pen.fillRect(x, y, winW, winH);
+        const emitGlow = emit.createRadialGradient(x + winW / 2, y + winH / 2, 4, x + winW / 2, y + winH / 2, winW * 0.7);
+        emitGlow.addColorStop(0, 'rgba(255,200,110,0.9)');
+        emitGlow.addColorStop(1, 'rgba(255,170,70,0.2)');
+        emit.fillStyle = emitGlow;
+        emit.fillRect(x, y, winW, winH);
       }
     }
   }
-  memo[key] = {
-    map: toTex(c),
-    emissiveMap: toTex(ec),
-    roughness: st.rough,
-    metalness: st.metal,
-  };
-  return memo[key];
-}
-
-// ------------------------------------------------------------ glow
-
-// One shared radial glow: a white-hot centre fading to transparent.
-// Callers tint it through the sprite material's colour instead of baking
-// a colour into the texture, so lamps, headlights, light bars and the low
-// sun all reuse the same canvas. Callers that need hard edges set
-// ClampToEdge themselves.
-export function glowTexture() {
-  if (memo.glow) return memo.glow;
-  const [c, g] = newCanvas(128, 128);
-  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 64);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.25, 'rgba(255,240,210,0.65)');
-  grad.addColorStop(0.6, 'rgba(255,190,120,0.18)');
-  grad.addColorStop(1, 'rgba(255,180,100,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 128, 128);
-  memo.glow = toTex(c);
-  memo.glow.wrapS = THREE.ClampToEdgeWrapping;
-  memo.glow.wrapT = THREE.ClampToEdgeWrapping;
-  return memo.glow;
-}
-
-// ------------------------------------------------------------ signs
-
-// Neon sign plate: an opaque dark backing (so no mirrored text can bleed
-// through from behind) with a coloured frame and glowing centred text.
-export function signTexture(text, opts) {
-  const o = opts || {};
-  const bg = o.bg || '#151822';
-  const fg = o.fg || '#fff4e0';
-  const border = o.border || '#ff5e99';
-  const [c, g] = newCanvas(512, 128);
-  g.fillStyle = bg;
-  g.fillRect(0, 0, 512, 128);
-  g.strokeStyle = border;
-  g.lineWidth = 8;
-  g.strokeRect(8, 8, 496, 112);
-  g.font = 'bold 56px "Arial Black", Impact, sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.shadowColor = border;
-  g.shadowBlur = 14;
-  g.fillStyle = fg;
-  g.fillText(text, 256, 66);
-  const t = toTex(c);
-  t.wrapS = THREE.ClampToEdgeWrapping;
-  t.wrapT = THREE.ClampToEdgeWrapping;
-  return t;
-}
-
-// ------------------------------------------------------------ wheels
-
-// Alloy wheel face: dark tyre ring, bright five-spoke hub, centre cap.
-// Painted on the hub disc of each wheel so the wheels read as wheels
-// instead of black cylinders.
-export function wheelTexture() {
-  if (memo.wheel) return memo.wheel;
-  const [c, g] = newCanvas(128, 128);
-  g.fillStyle = '#181a1e';
-  g.fillRect(0, 0, 128, 128);
-  g.beginPath();
-  g.arc(64, 64, 44, 0, Math.PI * 2);
-  g.fillStyle = '#9aa3ad';
-  g.fill();
-  g.beginPath();
-  g.arc(64, 64, 36, 0, Math.PI * 2);
-  g.fillStyle = '#252930';
-  g.fill();
-  g.strokeStyle = '#cfd6de';
-  g.lineWidth = 6;
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    g.beginPath();
-    g.moveTo(64, 64);
-    g.lineTo(64 + Math.cos(a) * 40, 64 + Math.sin(a) * 40);
-    g.stroke();
+  // A darker plinth at the base, and a few balconies and air-con boxes
+  // for depth: small rectangles with a soft shadow beneath them.
+  pen.fillStyle = 'rgba(0,0,0,0.25)';
+  pen.fillRect(0, SIZE - 60, SIZE, 60);
+  for (let i = 0; i < 6; i += 1) {
+    const bx = margin + dice() * (SIZE - margin * 2 - 90);
+    const by = margin + dice() * (SIZE - margin * 2 - 60);
+    pen.fillStyle = 'rgba(0,0,0,0.3)';
+    pen.fillRect(bx + 4, by + 8, 90, 8);
+    pen.fillStyle = style.trim;
+    pen.fillRect(bx, by, 90, 10);
   }
-  g.beginPath();
-  g.arc(64, 64, 10, 0, Math.PI * 2);
-  g.fillStyle = '#d8dee6';
-  g.fill();
-  memo.wheel = toTex(c);
-  return memo.wheel;
+  for (let i = 0; i < 5; i += 1) {
+    const ax = margin + dice() * (SIZE - margin * 2 - 60);
+    const ay = margin + dice() * (SIZE - margin * 2 - 40);
+    pen.fillStyle = '#c8c8c8';
+    pen.fillRect(ax, ay, 60, 40);
+    pen.fillStyle = 'rgba(0,0,0,0.2)';
+    pen.fillRect(ax, ay + 40, 60, 4);
+  }
+  const map = wrapTex(canvas);
+  const emissiveMap = wrapTex(emitCanvas);
+  return { map, emissiveMap };
 }
 
-// ------------------------------------------------------------ plates
+// One shared radial glow texture (lamps, headlights, light bars): a
+// soft white-hot centre fading to transparent. Callers tint it with
+// the sprite material's colour instead of baking a colour in.
+let sharedGlow = null;
+export function glowTexture() {
+  if (sharedGlow) return sharedGlow;
+  const [canvas, pen] = makeCanvas(128, 128);
+  const grad = pen.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  pen.fillStyle = grad;
+  pen.fillRect(0, 0, 128, 128);
+  sharedGlow = new THREE.CanvasTexture(canvas);
+  return sharedGlow;
+}
 
-// Licence plate: pale plate, dark blue top strip, dark code text.
+// A wheel: a dark tyre with a lighter rim and five spokes, drawn once
+// and shared by every car.
+export function wheelTexture() {
+  const [canvas, pen] = makeCanvas(128, 128);
+  pen.fillStyle = '#14161a';
+  pen.beginPath();
+  pen.arc(64, 64, 62, 0, Math.PI * 2);
+  pen.fill();
+  pen.fillStyle = '#3a3d42';
+  pen.beginPath();
+  pen.arc(64, 64, 40, 0, Math.PI * 2);
+  pen.fill();
+  pen.fillStyle = '#c8ccd2';
+  pen.beginPath();
+  pen.arc(64, 64, 28, 0, Math.PI * 2);
+  pen.fill();
+  // Five spokes.
+  pen.fillStyle = '#8a8e94';
+  for (let i = 0; i < 5; i += 1) {
+    const a = (i / 5) * Math.PI * 2;
+    pen.save();
+    pen.translate(64, 64);
+    pen.rotate(a);
+    pen.fillRect(-4, -26, 8, 26);
+    pen.restore();
+  }
+  pen.fillStyle = '#2c2f36';
+  pen.beginPath();
+  pen.arc(64, 64, 8, 0, Math.PI * 2);
+  pen.fill();
+  return new THREE.CanvasTexture(canvas);
+}
+
+// A licence plate: white, with dark text. The code is passed in, so
+// each car gets its own plate.
 export function plateTexture(code) {
-  const [c, g] = newCanvas(128, 48);
-  g.fillStyle = '#f4f0e2';
-  g.fillRect(0, 0, 128, 48);
-  g.fillStyle = '#1b4f8a';
-  g.fillRect(0, 0, 128, 12);
-  g.fillStyle = '#1a1d24';
-  g.font = 'bold 24px monospace';
-  g.textAlign = 'center';
-  g.fillText(code, 64, 38);
-  return toTex(c);
+  const [canvas, pen] = makeCanvas(256, 64);
+  pen.fillStyle = '#f2f2f2';
+  pen.fillRect(0, 0, 256, 64);
+  pen.strokeStyle = '#2c2f36';
+  pen.lineWidth = 4;
+  pen.strokeRect(2, 2, 252, 60);
+  pen.fillStyle = '#1c1e22';
+  pen.font = 'bold 36px Arial, sans-serif';
+  pen.textAlign = 'center';
+  pen.textBaseline = 'middle';
+  pen.fillText(code, 128, 34);
+  return new THREE.CanvasTexture(canvas);
 }

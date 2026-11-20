@@ -29,7 +29,7 @@ function paintCanvas(w, h, draw, repeatX, repeatY) {
   t.wrapS = THREE.RepeatWrapping;
   t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(repeatX || 1, repeatY || 1);
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   return t;
 }
 
@@ -67,16 +67,31 @@ function buildSky() {
   S.scene.add(dome);
 }
 
-// A speckled flat colour: base + a scatter of tinted dots.
+// A speckled flat colour: base + a scatter of soft tinted dots. Each
+// dot is a radial fade — full colour at the centre, transparent at the
+// edge — so the surface reads as material instead of a mosaic.
 function grainTex(base, dots, count, size) {
   return paintCanvas(256, 256, (g, w, h) => {
     g.fillStyle = base;
     g.fillRect(0, 0, w, h);
     for (let i = 0; i < count; i++) {
-      g.fillStyle = dots[Math.floor(dice() * dots.length)];
-      g.globalAlpha = 0.25 + dice() * 0.45;
+      const col = dots[Math.floor(dice() * dots.length)];
+      const a = 0.25 + dice() * 0.45;
       const s = 1 + dice() * size;
-      g.fillRect(dice() * w, dice() * h, s, s);
+      const x = dice() * w;
+      const y = dice() * h;
+      // Hex colour -> rgba with the dot's alpha, so the fade runs from the
+      // dot colour to transparent instead of to transparent black.
+      const r = parseInt(col.slice(1, 3), 16);
+      const gg = parseInt(col.slice(3, 5), 16);
+      const b = parseInt(col.slice(5, 7), 16);
+      const grad = g.createRadialGradient(x, y, 0.5, x, y, s);
+      grad.addColorStop(0, 'rgba(' + r + ',' + gg + ',' + b + ',' + a.toFixed(2) + ')');
+      grad.addColorStop(1, 'rgba(' + r + ',' + gg + ',' + b + ',0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(x, y, s, 0, Math.PI * 2);
+      g.fill();
     }
     g.globalAlpha = 1;
   }, 12, 12);
@@ -92,9 +107,27 @@ function plazaSurface() {
       g.beginPath(); g.moveTo((i * w) / 4, 0); g.lineTo((i * w) / 4, h); g.stroke();
       g.beginPath(); g.moveTo(0, (i * h) / 4); g.lineTo(w, (i * h) / 4); g.stroke();
     }
-    for (let i = 0; i < 260; i++) {
+    // A warm base with soft drift: a few radial tints across the slab and
+    // a scatter of soft round flecks, never hard square noise. The slab's
+    // radial warmth also helps the cafe seating read as a lit zone at dusk.
+    for (let i = 0; i < 6; i++) {
+      const x = dice() * w;
+      const y = dice() * h;
+      const r = 60 + dice() * 80;
+      const warm = g.createRadialGradient(x, y, 0, x, y, r);
+      warm.addColorStop(0, dice() > 0.5 ? 'rgba(200,150,90,0.10)' : 'rgba(255,220,160,0.08)');
+      warm.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = warm;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    for (let i = 0; i < 240; i++) {
       g.fillStyle = dice() > 0.5 ? 'rgba(255,255,255,0.10)' : 'rgba(60,50,35,0.12)';
-      g.fillRect(dice() * w, dice() * h, 2 + dice() * 3, 2 + dice() * 3);
+      const x = dice() * w;
+      const y = dice() * h;
+      const r = 1 + dice() * 3;
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
     }
   }, 10, 10);
 }
@@ -511,30 +544,97 @@ function layPark() {
   }
 }
 
+// One shared palm-frond texture, drawn once and reused by every palm:
+// a long feather leaf, pointed at both ends and widest near the middle,
+// filled with a soft green gradient (darker at the base, lighter at the
+// tip) and veined — a pale central rib with fine diagonal side veins.
+// The canvas is transparent outside the leaf, so alphaTest cuts the
+// frond out cleanly and the dusk sky shows through between the leaves.
+let palmLeafTex = null;
+function leafTexture() {
+  if (palmLeafTex) return palmLeafTex;
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 256, 0, 0);
+  grad.addColorStop(0, '#2e7a2e');
+  grad.addColorStop(0.55, '#3f9a3a');
+  grad.addColorStop(1, '#63c04f');
+  g.fillStyle = grad;
+  // The leaf outline: two quadratic curves meeting at a point at the tip
+  // and at the base, widest about 40% up from the base.
+  g.beginPath();
+  g.moveTo(64, 0);
+  g.quadraticCurveTo(118, 90, 78, 236);
+  g.quadraticCurveTo(70, 252, 64, 256);
+  g.quadraticCurveTo(58, 252, 50, 236);
+  g.quadraticCurveTo(10, 90, 64, 0);
+  g.closePath();
+  g.fill();
+  // The central rib: a pale line down the middle, thicker at the base.
+  g.strokeStyle = 'rgba(220,245,200,0.75)';
+  g.lineWidth = 5;
+  g.beginPath();
+  g.moveTo(64, 250);
+  g.lineTo(64, 8);
+  g.stroke();
+  // Fine side veins, angling from the rib out to the edge.
+  g.strokeStyle = 'rgba(220,245,200,0.35)';
+  g.lineWidth = 2;
+  for (let i = 0; i < 14; i++) {
+    const y = 30 + i * 15;
+    const spread = 34 - i * 1.2;
+    g.beginPath();
+    g.moveTo(64, y);
+    g.lineTo(64 + spread, y + 22);
+    g.stroke();
+    g.beginPath();
+    g.moveTo(64, y);
+    g.lineTo(64 - spread, y + 22);
+    g.stroke();
+  }
+  palmLeafTex = new THREE.CanvasTexture(c);
+  return palmLeafTex;
+}
+
 function plantPalm(x, z) {
-  // Trunk leans a little; fronds are long drooping tapered blades in two
-  // greens (not cones), with a coconut cluster at the crown.
+  // The trunk leans a little and curves: a tube along a gentle quadratic
+  // bend, not a straight cylinder. The crown sits where the old straight
+  // trunk's crown sat, so the fronds and coconuts are in the same place.
   const tilt = (dice() - 0.5) * 0.16;
+  const leanX = -Math.sin(tilt) * 5.5;
+  const trunkCurve = new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(x, 0, z),
+    new THREE.Vector3(x + leanX * 0.3, 2.8, z),
+    new THREE.Vector3(x + leanX, 5.5, z)
+  );
   const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.2, 0.34, 5.5, 6),
+    new THREE.TubeGeometry(trunkCurve, 10, 0.27, 6, false),
     flat(0x8a6a42)
   );
-  trunk.position.set(x, 2.75, z);
-  trunk.rotation.z = tilt;
   trunk.castShadow = true;
   S.scene.add(trunk);
-  const crownX = x - Math.sin(tilt) * 5.5;
-  const leafGreens = [0x3f9a3a, 0x55b04a];
-  const bladeGeo = new THREE.BoxGeometry(0.34, 0.05, 3.2);
-  bladeGeo.translate(0, 0, 1.6); // pivot at the crown, tip out
+  const crownX = x + leanX;
+  // Fronds are feather leaves, not solid blades: a canvas-drawn leaf with
+  // a vein gradient on a plane, alphaTest cutting the leaf shape out so
+  // the sky shows between the fronds. The plane is laid flat and pivoted
+  // at the crown, so each leaf droops outward like a real palm frond.
+  const leafGeo = new THREE.PlaneGeometry(0.85, 3.2);
+  leafGeo.rotateX(Math.PI / 2); // leaf length now runs along +Z
+  leafGeo.translate(0, 0, 1.6); // pivot at the crown, tip out
+  const leafMats = [
+    new THREE.MeshLambertMaterial({ map: leafTexture(), alphaTest: 0.35, side: THREE.DoubleSide }),
+    new THREE.MeshLambertMaterial({ map: leafTexture(), color: 0xd8f0d0, alphaTest: 0.35, side: THREE.DoubleSide }),
+  ];
   for (let i = 0; i < 8; i++) {
     const ang = (i / 8) * Math.PI * 2 + dice() * 0.3;
-    const blade = new THREE.Mesh(bladeGeo, new THREE.MeshLambertMaterial({ color: leafGreens[i % 2] }));
-    blade.position.set(crownX, 5.6, z);
-    blade.rotation.y = -ang;
-    blade.rotation.x = 0.75 + dice() * 0.3; // droop downward, short reach
-    blade.castShadow = true;
-    S.scene.add(blade);
+    const leaf = new THREE.Mesh(leafGeo, leafMats[i % 2]);
+    leaf.position.set(crownX, 5.6, z);
+    leaf.rotation.y = -ang;
+    leaf.rotation.x = 0.75 + dice() * 0.3; // droop downward, short reach
+    leaf.castShadow = true;
+    S.scene.add(leaf);
   }
   const nutSkin = flat(0x6a4a22);
   for (let i = 0; i < 3; i++) {
@@ -545,13 +645,25 @@ function plantPalm(x, z) {
   placeBlob(x, z, 3.4, 0.025);
 }
 
+// A modern curved streetlight: one smooth tube that rises straight and
+// then bends over in a single continuous curve, instead of a vertical
+// pole plus a horizontal arm at a hard 90 degrees. The bend is a
+// quadratic bezier — the control point sits directly above the base, so
+// the tube leaves the ground vertically and arrives at the bulb
+// horizontally. The warm bulb and its glow halo stay exactly where they
+// were, so the light still falls on the same patch of road.
 function plantLamp(x, z) {
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 6, 6), flat(0x2c2f36));
-  pole.position.set(x, 3, z);
+  const curve = new THREE.QuadraticBezierCurve3(
+    new THREE.Vector3(x, 0, z),
+    new THREE.Vector3(x, 5.9, z),
+    new THREE.Vector3(x + 1.6, 5.85, z)
+  );
+  const pole = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 16, 0.1, 8, false),
+    flat(0x2c2f36)
+  );
   pole.castShadow = true;
   S.scene.add(pole);
-  const arm = addBox(1.6, 0.1, 0.1, flat(0x2c2f36), x + 0.8, 5.9, z);
-  void arm;
   // At dusk the lamps are on: warm bulb + a soft glow sprite.
   const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(0.28, 8, 6),
@@ -726,7 +838,7 @@ function buildLandmarkTower() {
   beacon.position.set(cx, 146.5, cz);
   S.scene.add(beacon);
   const signTex2 = neonSign([
-    { text: 'SOLMAR TOWER', size: 68, color: '#9ad8ff', y: 128 },
+    { text: 'SOLMAR TOWER', size: 56, color: '#9ad8ff', y: 128 },
   ], '#9ad8ff', '#4da8ff');
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(18, 9),

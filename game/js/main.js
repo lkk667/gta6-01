@@ -434,11 +434,18 @@ export function stageMission() {
   // the tower fills the upper frame and the near pavement drops out.
   // That level look could not see the tower sign at all — the lens
   // always points at the player's chest (y=1.55), so a sign 80 m up
-  // sits above the frame. Tilt the lens up (pitch -0.12) so the tower
-  // and its sign come into the upper frame; the street still fills the
-  // lower half.
-  S.camPitch = -0.12;
-  S.camDist = 10;
+  // sits above the frame. Tilt the lens up (pitch -0.15, the clamp
+  // minimum) so the tower and its sign come into the upper frame: the
+  // sign's top edge sits at about 38.2 degrees up from the player, and
+  // at -0.12 the frame top only reached 37.8 degrees, cropping the
+  // sign's top by a hair; at -0.15 the frame top reaches about 39.5
+  // degrees, clearing it. The street still fills the lower half.
+  // The camera sits closer (7 m, not 10 m) so it rides higher off the
+  // ground: at 10 m the up-tilt put the lens almost on the pavement
+  // and the near road washed out white at the glancing angle; at 7 m
+  // the lens is half a metre up and the foreground reads as street.
+  S.camPitch = -0.15;
+  S.camDist = 7;
   // Street life: a talking pair further down the road for depth, a waiter
   // at the kerb in the lower-left foreground, one more walker on the
   // north sidewalk close to the camera, and one waiting at the south
@@ -502,15 +509,17 @@ export function stageFoot() {
   // On road z=-40, facing Cafe Luna. Framing: the rooftop sign tops out
   // at y≈17, so the camera must sit low and look UP — but the old pitch
   // (-0.1) put the camera almost on the ground and the near pavement
-  // filled the bottom 40% of the frame. Pitch -0.02 at 12 m keeps the
+  // filled the bottom 40% of the frame. Pitch -0.06 at 12 m keeps the
   // whole CAFE LUNA sign in frame while the parked cars and the
-  // foreground walker still fill the lower frame.
+  // foreground walker still fill the lower frame, and it lifts the
+  // frame bottom enough that the shadowed near pavement is a thin
+  // strip instead of a dark void.
   player.pos.x = -60;
   player.pos.z = -40;
   player.group.position.set(-60, 0, -40);
   player.heading = Math.PI; // facing north, walking toward Cafe Luna
   S.camYaw = 0; // camera south of the player, looking north at the sign
-  S.camPitch = -0.02;
+  S.camPitch = -0.06;
   S.camDist = 12;
   S.objectiveText = '';
   S.objectiveDist = null;
