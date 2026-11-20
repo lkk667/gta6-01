@@ -1,21 +1,21 @@
-// Solmar City — on-foot character and third-person camera.
-// The figure is built to read as a person, not a box: a tapered torso
-// (wider chest, narrower waist), a neck, a head that is small next to the
-// shoulders, two slim legs with a real gap between them, arms hanging at
-// the sides, and shoes that swing with the walk. The camera still frames
-// over the right shoulder, so the crosshair clears the head and aims into
-// open view instead of at the back of the skull.
+// Solmar City — the on-foot character and the third-person camera.
+// The figure is shaped to read as a person, not a box: a torso that
+// tapers from a wider chest to a narrower waist, a neck, a head that is
+// small beside the shoulders, two slim legs with a real gap between them,
+// arms hanging at the sides, and shoes that swing with the walk. The
+// camera still frames over the right shoulder, so the crosshair clears
+// the head and aims into open view instead of at the back of the skull.
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, clamp } from './state.js';
 import { resolveCollisions, attachBlob } from './city.js';
 
-const WALK_PACE = 6;
-const RUN_PACE = 10;
+const WALK_SPEED = 6;
+const RUN_SPEED = 10;
 
-// 4-point star for the muzzle flash: 8 vertices alternating outer and
-// inner radius, a hot white core, a warm glow edge.
-function flashStarTex() {
+// 4-point star for the muzzle flash: 8 points alternating outer and inner
+// radius, a hot white core, a warm glowing edge.
+function starTexture() {
   const cv = document.createElement('canvas');
   cv.width = 128;
   cv.height = 128;
@@ -44,46 +44,46 @@ function flashStarTex() {
 
 export function buildPlayer() {
   const group = new THREE.Group();
-  const skin = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
-  const shirt = new THREE.MeshLambertMaterial({ color: 0x2a7ab8 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
-  const shoe = new THREE.MeshLambertMaterial({ color: 0xf2f2f2 });
-  const capRed = new THREE.MeshLambertMaterial({ color: 0xe84a4a });
+  const skinMat = new THREE.MeshLambertMaterial({ color: 0xe8b88a });
+  const shirtMat = new THREE.MeshLambertMaterial({ color: 0x2a7ab8 });
+  const pantsMat = new THREE.MeshLambertMaterial({ color: 0x2c2f36 });
+  const shoeMat = new THREE.MeshLambertMaterial({ color: 0xf2f2f2 });
+  const capMat = new THREE.MeshLambertMaterial({ color: 0xe84a4a });
 
-  // Tapered torso: a chest that is wider than the waist, with a shoulder
-  // bar across the top so the figure has shoulders instead of a slab.
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.42, 0.3), shirt);
+  // Tapered torso: a chest wider than the waist, with a shoulder bar
+  // across the top so the figure has shoulders instead of a slab.
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.42, 0.3), shirtMat);
   chest.position.y = 1.24;
   chest.castShadow = true;
   group.add(chest);
-  const waist = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.3, 0.26), shirt);
+  const waist = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.3, 0.26), shirtMat);
   waist.position.y = 0.88;
   waist.castShadow = true;
   group.add(waist);
-  const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.12, 0.32), shirt);
+  const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.12, 0.32), shirtMat);
   shoulders.position.y = 1.44;
   shoulders.castShadow = true;
   group.add(shoulders);
-  // Neck between torso and head, so the head does not sit on the chest.
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.14, 8), skin);
+  // A neck between torso and head, so the head does not sit on the chest.
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.14, 8), skinMat);
   neck.position.y = 1.52;
   group.add(neck);
-  const face = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), skin);
+  const face = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), skinMat);
   face.position.y = 1.68;
   face.castShadow = true;
   group.add(face);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.23, 0.09, 12), capRed);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.23, 0.09, 12), capMat);
   cap.position.y = 1.86;
   group.add(cap);
-  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.24), capRed);
+  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.24), capMat);
   brim.position.set(0, 1.82, 0.26);
   group.add(brim);
 
   // Two slim legs with a visible gap, pivoting at the hip so the walk
   // swing reads from the joint instead of the middle of the limb.
-  const legShape = new THREE.BoxGeometry(0.17, 0.78, 0.2);
-  legShape.translate(0, -0.39, 0);
-  const leftLeg = new THREE.Mesh(legShape, pants);
+  const legGeo = new THREE.BoxGeometry(0.17, 0.78, 0.2);
+  legGeo.translate(0, -0.39, 0);
+  const leftLeg = new THREE.Mesh(legGeo, pantsMat);
   leftLeg.position.set(-0.13, 0.78, 0);
   leftLeg.castShadow = true;
   group.add(leftLeg);
@@ -91,31 +91,31 @@ export function buildPlayer() {
   rightLeg.position.x = 0.13;
   group.add(rightLeg);
   // Arms hang at the sides, pivoting at the shoulder.
-  const armShape = new THREE.BoxGeometry(0.15, 0.64, 0.17);
-  armShape.translate(0, -0.32, 0);
-  const leftArm = new THREE.Mesh(armShape, shirt);
+  const armGeo = new THREE.BoxGeometry(0.15, 0.64, 0.17);
+  armGeo.translate(0, -0.32, 0);
+  const leftArm = new THREE.Mesh(armGeo, shirtMat);
   leftArm.position.set(-0.34, 1.42, 0);
   group.add(leftArm);
   const rightArm = leftArm.clone();
   rightArm.position.x = 0.34;
   group.add(rightArm);
   // Shoes ride on the legs so they swing with the walk, toes forward.
-  const shoeShape = new THREE.BoxGeometry(0.17, 0.09, 0.3);
-  const shoeL = new THREE.Mesh(shoeShape, shoe);
+  const shoeGeo = new THREE.BoxGeometry(0.17, 0.09, 0.3);
+  const shoeL = new THREE.Mesh(shoeGeo, shoeMat);
   shoeL.position.set(0, -0.74, 0.04);
   leftLeg.add(shoeL);
-  const shoeR = new THREE.Mesh(shoeShape, shoe);
+  const shoeR = new THREE.Mesh(shoeGeo, shoeMat);
   shoeR.position.set(0, -0.74, 0.04);
   rightLeg.add(shoeR);
 
   // Pistol in the right hand, held forward. The muzzle flash is a child
   // of this gun mesh, so flash and gun can never drift apart on screen.
-  const gunDark = new THREE.MeshLambertMaterial({ color: 0x1c1e22 });
+  const gunMat = new THREE.MeshLambertMaterial({ color: 0x1c1e22 });
   const pistol = new THREE.Group();
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.46), gunDark);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.46), gunMat);
   barrel.position.z = 0.18;
   pistol.add(barrel);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.24, 0.12), gunDark);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.24, 0.12), gunMat);
   grip.position.set(0, -0.14, -0.02);
   pistol.add(grip);
   pistol.position.set(0.34, 1.02, 0.28);
@@ -125,7 +125,7 @@ export function buildPlayer() {
   // to the gun barrel tip — never a yellow ball, never a ground puddle.
   // The light is small and short-range on purpose: it lights the gun, not
   // the whole street.
-  const star = flashStarTex();
+  const star = starTexture();
   const flashMat = new THREE.MeshBasicMaterial({ map: star, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
   const planeA = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7), flashMat);
   planeA.position.z = 0.72;
@@ -155,7 +155,7 @@ export function buildPlayer() {
   return S.player;
 }
 
-function moveInput() {
+function readMoveKeys() {
   const k = S.keys;
   return {
     fwd: (k.KeyW || k.ArrowUp) ? 1 : 0,
@@ -169,7 +169,7 @@ function moveInput() {
 export function updatePlayer(dt) {
   const p = S.player;
   if (!p) return;
-  const keys = moveInput();
+  const keys = readMoveKeys();
   const fwdX = -Math.sin(S.camYaw);
   const fwdZ = -Math.cos(S.camYaw);
   const rightX = Math.cos(S.camYaw);
@@ -177,7 +177,7 @@ export function updatePlayer(dt) {
   let ix = fwdX * (keys.fwd - keys.back) + rightX * (keys.right - keys.left);
   let iz = fwdZ * (keys.fwd - keys.back) + rightZ * (keys.right - keys.left);
   const len = Math.hypot(ix, iz);
-  const target = keys.sprint ? RUN_PACE : WALK_PACE;
+  const target = keys.sprint ? RUN_SPEED : WALK_SPEED;
   if (len > 0.01) {
     ix /= len;
     iz /= len;
@@ -194,7 +194,7 @@ export function updatePlayer(dt) {
   p.group.rotation.y = p.heading;
 
   // Walk/run cycle.
-  const swing = Math.min(1, p.speed / RUN_PACE) * 0.65;
+  const swing = Math.min(1, p.speed / RUN_SPEED) * 0.65;
   const ph = p.walkPhase;
   p.legL.rotation.x = Math.sin(ph) * swing;
   p.legR.rotation.x = -Math.sin(ph) * swing;
@@ -204,8 +204,8 @@ export function updatePlayer(dt) {
     p.punchTimer -= dt;
     p.armR.rotation.x = -1.4 * Math.max(0, p.punchTimer / 0.28);
   }
-  // Gun stays level while walking.
-  p.gun.rotation.x = Math.sin(ph * 2) * 0.03 * Math.min(1, p.speed / WALK_PACE);
+  // The gun stays level while walking.
+  p.gun.rotation.x = Math.sin(ph * 2) * 0.03 * Math.min(1, p.speed / WALK_SPEED);
 
   // Muzzle flash decay (or held open by the staging debug hook).
   if (!S.debug.holdFlash) {

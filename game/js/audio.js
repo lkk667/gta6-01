@@ -12,13 +12,13 @@ export function buildAudio() {
   const audio = {
     ctx: null,
     master: null,
-    engineOsc: null,
-    engineGain: null,
-    sirenOsc: null,
-    sirenGain: null,
-    sirenHi: false,
-    sirenFlip: 0,
-    sirenLast: 0,
+    engineOscillator: null,
+    engineLevel: null,
+    sirenOscillator: null,
+    sirenLevel: null,
+    sirenHigh: false,
+    sirenStep: 0,
+    sirenSeen: 0,
 
     unlock() {
       try {
@@ -30,27 +30,27 @@ export function buildAudio() {
           this.master.gain.value = 0.5;
           this.master.connect(this.ctx.destination);
           // Engine: a low sawtooth whose pitch follows road speed.
-          this.engineOsc = this.ctx.createOscillator();
-          this.engineOsc.type = 'sawtooth';
-          this.engineOsc.frequency.value = 50;
-          this.engineGain = this.ctx.createGain();
-          this.engineGain.gain.value = 0;
-          const engineFilter = this.ctx.createBiquadFilter();
-          engineFilter.type = 'lowpass';
-          engineFilter.frequency.value = 320;
-          this.engineOsc.connect(engineFilter);
-          engineFilter.connect(this.engineGain);
-          this.engineGain.connect(this.master);
-          this.engineOsc.start();
+          this.engineOscillator = this.ctx.createOscillator();
+          this.engineOscillator.type = 'sawtooth';
+          this.engineOscillator.frequency.value = 50;
+          this.engineLevel = this.ctx.createGain();
+          this.engineLevel.gain.value = 0;
+          const engineLowpass = this.ctx.createBiquadFilter();
+          engineLowpass.type = 'lowpass';
+          engineLowpass.frequency.value = 320;
+          this.engineOscillator.connect(engineLowpass);
+          engineLowpass.connect(this.engineLevel);
+          this.engineLevel.connect(this.master);
+          this.engineOscillator.start();
           // Siren: a sine that alternates between two notes.
-          this.sirenOsc = this.ctx.createOscillator();
-          this.sirenOsc.type = 'sine';
-          this.sirenOsc.frequency.value = 700;
-          this.sirenGain = this.ctx.createGain();
-          this.sirenGain.gain.value = 0;
-          this.sirenOsc.connect(this.sirenGain);
-          this.sirenGain.connect(this.master);
-          this.sirenOsc.start();
+          this.sirenOscillator = this.ctx.createOscillator();
+          this.sirenOscillator.type = 'sine';
+          this.sirenOscillator.frequency.value = 700;
+          this.sirenLevel = this.ctx.createGain();
+          this.sirenLevel.gain.value = 0;
+          this.sirenOscillator.connect(this.sirenLevel);
+          this.sirenLevel.connect(this.master);
+          this.sirenOscillator.start();
         }
         if (this.ctx.state === 'suspended') this.ctx.resume();
       } catch (_) { /* sound is optional; the game plays on silently */ }
@@ -105,9 +105,9 @@ export function buildAudio() {
       // Mission-complete arpeggio: four rising notes.
       try {
         if (!this.ctx || S.muted) return;
-        const notes = [523, 659, 784, 1047];
-        notes.forEach((f, i) => {
-          setTimeout(() => this.blip(f, 0.22, 'triangle', 0.35), i * 110);
+        const melody = [523, 659, 784, 1047];
+        melody.forEach((freq, i) => {
+          setTimeout(() => this.blip(freq, 0.22, 'triangle', 0.35), i * 110);
         });
       } catch (_) { /* ignore */ }
     },
@@ -119,14 +119,14 @@ export function buildAudio() {
     engine(pace, isAuto) {
       try {
         if (!this.ctx || S.muted) return;
-        if (!this.engineOsc || !this.engineGain) return;
+        if (!this.engineOscillator || !this.engineLevel) return;
         if (!isAuto) {
-          this.engineGain.gain.value = 0;
+          this.engineLevel.gain.value = 0;
           return;
         }
         const p = Math.min(1, Math.max(0, pace || 0));
-        this.engineOsc.frequency.value = 45 + p * 100;
-        this.engineGain.gain.value = 0.04 + p * 0.05;
+        this.engineOscillator.frequency.value = 45 + p * 100;
+        this.engineLevel.gain.value = 0.04 + p * 0.05;
       } catch (_) { /* ignore */ }
     },
 
@@ -136,16 +136,16 @@ export function buildAudio() {
     siren(d) {
       try {
         if (!this.ctx || S.muted) return;
-        if (!this.sirenOsc || !this.sirenGain) return;
-        this.sirenLast = Date.now();
+        if (!this.sirenOscillator || !this.sirenLevel) return;
+        this.sirenSeen = Date.now();
         if ((S.heat || 0) <= 0) {
-          this.sirenGain.gain.value = 0;
+          this.sirenLevel.gain.value = 0;
           return;
         }
         const near = Math.max(0, 1 - (d || 0) / 80);
-        this.sirenGain.gain.value = 0.05 * near;
+        this.sirenLevel.gain.value = 0.05 * near;
         const hi = Math.floor(S.time * 2) % 2 === 0;
-        this.sirenOsc.frequency.value = hi ? 950 : 700;
+        this.sirenOscillator.frequency.value = hi ? 950 : 700;
       } catch (_) { /* ignore */ }
     },
 
@@ -162,9 +162,9 @@ export function buildAudio() {
     busted() {
       try {
         if (!this.ctx || S.muted) return;
-        const notes = [392, 330, 262];
-        notes.forEach((f, i) => {
-          setTimeout(() => this.blip(f, 0.3, 'triangle', 0.4), i * 200);
+        const melody = [392, 330, 262];
+        melody.forEach((freq, i) => {
+          setTimeout(() => this.blip(freq, 0.3, 'triangle', 0.4), i * 200);
         });
       } catch (_) { /* ignore */ }
     },
@@ -177,16 +177,16 @@ export function buildAudio() {
       try {
         if (!this.ctx) return;
         if (S.muted) {
-          if (this.engineGain) this.engineGain.gain.value = 0;
-          if (this.sirenGain) this.sirenGain.gain.value = 0;
+          if (this.engineLevel) this.engineLevel.gain.value = 0;
+          if (this.sirenLevel) this.sirenLevel.gain.value = 0;
           return;
         }
         // On foot, the engine hum fades out (updateDriving no longer calls
         // engine() to keep it alive).
-        if (S.onFoot && this.engineGain) this.engineGain.gain.value = 0;
+        if (S.onFoot && this.engineLevel) this.engineLevel.gain.value = 0;
         // If no cruiser has been near recently, the siren fades out.
-        if (this.sirenGain && Date.now() - this.sirenLast > 600) {
-          this.sirenGain.gain.value = 0;
+        if (this.sirenLevel && Date.now() - this.sirenSeen > 600) {
+          this.sirenLevel.gain.value = 0;
         }
       } catch (_) { /* ignore */ }
     },

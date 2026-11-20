@@ -1,4 +1,4 @@
-// Solmar City — cars: factory, arcade driving, enter/exit/steal.
+// Solmar City — cars: factory, arcade driving, enter / exit / steal.
 // The bodywork is shaped to read as a car, not a box: the hood slopes
 // down toward the nose and the trunk slopes down toward the tail, side
 // mirrors stand out from the front doors, thin door seams break the
@@ -13,27 +13,28 @@ import { S, WORLD, addHeat, clamp, dist2 } from './state.js';
 import { resolveCollisions, attachBlob } from './city.js';
 import { glowTexture, wheelTexture, plateTexture } from './textures.js';
 
-const PAINT_COLOURS = [0xd8b83a, 0x3a7ad8, 0xd84a4a, 0x4ad87a, 0xe8e8e8, 0x222226, 0xd87ab8, 0x7ad8d8];
+const PAINTS = [0xd8b83a, 0x3a7ad8, 0xd84a4a, 0x4ad87a, 0xe8e8e8, 0x222226, 0xd87ab8, 0x7ad8d8];
 
 // ------------------------------------------------------------ shared bits
 
-// One set of materials for every car, so 40+ cars on the road cost almost
-// nothing extra. Paint is a clearcoat physical material: the dusk sky
-// reflects in it now that the scene has an environment map.
-const paintMemo = new Map();
-function paintMat(hex) {
-  let m = paintMemo.get(hex);
+// One material per paint colour, shared by every car, so forty cars on the
+// road cost almost nothing extra. The paint is a clearcoat physical
+// material: the dusk sky reflects in it now that the scene has an
+// environment map.
+const paintCache = new Map();
+function paintFor(hex) {
+  let m = paintCache.get(hex);
   if (!m) {
     m = new THREE.MeshPhysicalMaterial({
       color: hex, metalness: 0.55, roughness: 0.24,
       clearcoat: 0.85, clearcoatRoughness: 0.16,
     });
-    paintMemo.set(hex, m);
+    paintCache.set(hex, m);
   }
   return m;
 }
 
-const SHARED = {
+const MATS = {
   glass: new THREE.MeshStandardMaterial({ color: 0x111722, metalness: 0.9, roughness: 0.08 }),
   glassEdge: new THREE.MeshBasicMaterial({ color: 0x3a5a78 }),
   windowFrame: new THREE.MeshBasicMaterial({ color: 0x0e1218 }),
@@ -48,20 +49,20 @@ const SHARED = {
   }),
 };
 
-let hubMat = null;
-function hubMatFor() {
-  if (!hubMat) {
-    hubMat = new THREE.MeshStandardMaterial({ map: wheelTexture(), metalness: 0.6, roughness: 0.35 });
+let hubMaterial = null;
+function hubFor() {
+  if (!hubMaterial) {
+    hubMaterial = new THREE.MeshStandardMaterial({ map: wheelTexture(), metalness: 0.6, roughness: 0.35 });
   }
-  return hubMat;
+  return hubMaterial;
 }
 
-function plateNo() {
+function plateNumber() {
   return 'SLM-' + (100 + Math.floor(Math.random() * 900));
 }
 
 // A glow sprite from the shared radial texture, tinted by its material.
-function glowSprite(color, size) {
+function makeGlow(color, size) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
     map: glowTexture(), color, transparent: true, depthWrite: false,
   }));
@@ -69,11 +70,11 @@ function glowSprite(color, size) {
   return sp;
 }
 
-// Warm pool of light on the asphalt under a police light bar. One cached
+// A warm pool of light on the asphalt under a police light bar. One cached
 // canvas per colour, drawn on a ground-hugging plane.
-const poolMemo = new Map();
-function groundPool(rgba) {
-  let tex = poolMemo.get(rgba);
+const poolCache = new Map();
+function lightPool(rgba) {
+  let tex = poolCache.get(rgba);
   if (!tex) {
     const c = document.createElement('canvas');
     c.width = 64;
@@ -86,7 +87,7 @@ function groundPool(rgba) {
     g.fillStyle = grad;
     g.fillRect(0, 0, 64, 64);
     tex = new THREE.CanvasTexture(c);
-    poolMemo.set(rgba, tex);
+    poolCache.set(rgba, tex);
   }
   const m = new THREE.Mesh(
     new THREE.PlaneGeometry(3.4, 4.6),
@@ -98,9 +99,9 @@ function groundPool(rgba) {
   return m;
 }
 
-let taxiSign = null;
-function taxiSignTex() {
-  if (taxiSign) return taxiSign;
+let taxiTexture = null;
+function taxiSignTexture() {
+  if (taxiTexture) return taxiTexture;
   const c = document.createElement('canvas');
   c.width = 128;
   c.height = 48;
@@ -112,8 +113,8 @@ function taxiSignTex() {
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.fillText('TAXI', 64, 25);
-  taxiSign = new THREE.CanvasTexture(c);
-  return taxiSign;
+  taxiTexture = new THREE.CanvasTexture(c);
+  return taxiTexture;
 }
 
 // ------------------------------------------------------------ factory
@@ -123,23 +124,24 @@ export function makeCar(color, police, kind) {
   const model = police ? 'police' : (kind || 'sedan');
   // No paint colour given means "pick a random one" (traffic cars).
   const paintHex = color === undefined
-    ? PAINT_COLOURS[Math.floor(Math.random() * PAINT_COLOURS.length)]
+    ? PAINTS[Math.floor(Math.random() * PAINTS.length)]
     : color;
   const truck = model === 'truck';
   const taxi = model === 'taxi';
-  // Proportions per model: sedan 4.3 m, truck 5.4 m with a tall cab and a
-  // cargo box, police a two-tone sedan, taxi a sedan with a roof sign.
+  // Proportions per model: a sedan is 4.3 m, a truck 5.4 m with a tall cab
+  // and a cargo box, a police car a two-tone sedan, a taxi a sedan with a
+  // roof sign.
   const len = truck ? 5.4 : 4.3;
-  const paint = paintMat(police ? 0xf2f2f2 : taxi ? 0xe8c832 : paintHex);
+  const paint = paintFor(police ? 0xf2f2f2 : taxi ? 0xe8c832 : paintHex);
 
   // Small local builders: a box placed in the group, and a flat pane.
-  const placeBox = (w, h, d, mat, x, y, z) => {
+  const addBox = (w, h, d, mat, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     m.position.set(x, y, z);
     group.add(m);
     return m;
   };
-  const placePane = (w, h, mat, x, y, z, ry) => {
+  const addPane = (w, h, mat, x, y, z, ry) => {
     const p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
     p.position.set(x, y, z);
     if (ry) p.rotation.y = ry;
@@ -148,49 +150,50 @@ export function makeCar(color, police, kind) {
   };
 
   // Lower body and cabin. The police cabin is WHITE with dark glass: from
-  // behind, a white cabin + black roof + light bar reads as a police car,
-  // while a black cabin made the whole cruiser read as a black traffic car.
-  const body = placeBox(truck ? 2.0 : 1.9, truck ? 0.7 : 0.62, len, paint, 0, truck ? 0.68 : 0.62, 0);
+  // behind, a white cabin plus a black roof plus a light bar reads as a
+  // police car, while a black cabin made the whole cruiser read as a black
+  // traffic car.
+  const body = addBox(truck ? 2.0 : 1.9, truck ? 0.7 : 0.62, len, paint, 0, truck ? 0.68 : 0.62, 0);
   body.castShadow = true;
   let cabinZ;
   if (truck) {
     cabinZ = 1.55;
-    const cab = placeBox(1.9, 0.85, 1.5, paintMat(0x2a4a6a), 0, 1.5, cabinZ);
+    const cab = addBox(1.9, 0.85, 1.5, paintFor(0x2a4a6a), 0, 1.5, cabinZ);
     cab.castShadow = true;
-    const cargo = placeBox(1.95, 1.25, 2.7, paintMat(0xb8bcc2), 0, 1.55, -1.1);
+    const cargo = addBox(1.95, 1.25, 2.7, paintFor(0xb8bcc2), 0, 1.55, -1.1);
     cargo.castShadow = true;
     // Cargo ribs down the box.
     for (const rz of [-2.1, -1.1, -0.1]) {
-      placeBox(1.97, 1.27, 0.08, paintMat(0x8a8e94), 0, 1.55, rz);
+      addBox(1.97, 1.27, 0.08, paintFor(0x8a8e94), 0, 1.55, rz);
     }
   } else {
     cabinZ = -0.25;
     const cabMat = police
-      ? paintMat(0xf2f2f2)
+      ? paintFor(0xf2f2f2)
       : new THREE.MeshPhysicalMaterial({ color: 0x223344, metalness: 0.4, roughness: 0.3, clearcoat: 0.6 });
-    const cab = placeBox(1.7, 0.55, 2.2, cabMat, 0, 1.18, cabinZ);
+    const cab = addBox(1.7, 0.55, 2.2, cabMat, 0, 1.18, cabinZ);
     cab.castShadow = true;
   }
 
-  // Sloped hood and trunk (sedans only): the nose and tail fall away from
-  // the cabin instead of running flat, so the silhouette is a car, not a
-  // brick. A positive x-rotation drops the +z (front) end; negative drops
-  // the -z (rear) end.
+  // Sloped hood and trunk (sedans only): the nose and the tail fall away
+  // from the cabin instead of running flat, so the silhouette is a car,
+  // not a brick. A positive x-rotation drops the +z (front) end; a
+  // negative one drops the -z (rear) end.
   if (!truck) {
-    const hood = placeBox(1.7, 0.08, 1.1, paint, 0, 0.96, 1.55);
+    const hood = addBox(1.7, 0.08, 1.1, paint, 0, 0.96, 1.55);
     hood.rotation.x = 0.2;
-    const trunk = placeBox(1.7, 0.08, 0.9, paint, 0, 0.96, -1.65);
+    const trunk = addBox(1.7, 0.08, 0.9, paint, 0, 0.96, -1.65);
     trunk.rotation.x = -0.18;
     // Side mirrors on short stalks at the front doors.
     for (const s of [-1, 1]) {
-      placeBox(0.14, 0.04, 0.04, SHARED.darkTrim, s * 0.98, 1.08, 0.85);
-      placeBox(0.06, 0.14, 0.2, SHARED.darkTrim, s * 1.04, 1.1, 0.85);
+      addBox(0.14, 0.04, 0.04, MATS.darkTrim, s * 0.98, 1.08, 0.85);
+      addBox(0.06, 0.14, 0.2, MATS.darkTrim, s * 1.04, 1.1, 0.85);
     }
     // Door seams: thin dark verticals where the front and rear doors meet
     // the body, so the flank reads as doors instead of one slab.
     for (const s of [-1, 1]) {
-      placeBox(0.02, 0.42, 0.03, SHARED.darkTrim, s * 0.96, 0.72, 0.55);
-      placeBox(0.02, 0.42, 0.03, SHARED.darkTrim, s * 0.96, 0.72, -0.75);
+      addBox(0.02, 0.42, 0.03, MATS.darkTrim, s * 0.96, 0.72, 0.55);
+      addBox(0.02, 0.42, 0.03, MATS.darkTrim, s * 0.96, 0.72, -0.75);
     }
   }
 
@@ -200,26 +203,26 @@ export function makeCar(color, police, kind) {
   const winZ = cabinZ + (truck ? 0.78 : 1.12);
   const winW = truck ? 1.7 : 1.5;
   const winY = truck ? 1.55 : 1.22;
-  const shield = placePane(winW, truck ? 0.6 : 0.5, SHARED.glass, 0, winY, winZ);
+  const shield = addPane(winW, truck ? 0.6 : 0.5, MATS.glass, 0, winY, winZ);
   shield.rotation.x = -0.28;
-  const shieldEdge = placePane(winW, 0.05, SHARED.glassEdge, 0, truck ? 1.88 : 1.46, winZ + 0.08);
+  const shieldEdge = addPane(winW, 0.05, MATS.glassEdge, 0, truck ? 1.88 : 1.46, winZ + 0.08);
   shieldEdge.rotation.x = -0.28;
   for (const s of [-1, 1]) {
     // Dark frame first, slightly larger; the glass sits inside it.
-    placePane(truck ? 1.26 : 1.98, 0.52, SHARED.windowFrame, s * (truck ? 0.96 : 0.855), truck ? 1.55 : 1.2, cabinZ, s * Math.PI / 2);
-    placePane(truck ? 1.2 : 1.9, 0.42, SHARED.glass, s * (truck ? 0.96 : 0.86), truck ? 1.55 : 1.2, cabinZ, s * Math.PI / 2);
+    addPane(truck ? 1.26 : 1.98, 0.52, MATS.windowFrame, s * (truck ? 0.96 : 0.855), truck ? 1.55 : 1.2, cabinZ, s * Math.PI / 2);
+    addPane(truck ? 1.2 : 1.9, 0.42, MATS.glass, s * (truck ? 0.96 : 0.86), truck ? 1.55 : 1.2, cabinZ, s * Math.PI / 2);
   }
-  placePane(winW, 0.45, SHARED.glass, 0, truck ? 1.55 : 1.2, cabinZ - (truck ? 0.78 : 1.12), Math.PI);
+  addPane(winW, 0.45, MATS.glass, 0, truck ? 1.55 : 1.2, cabinZ - (truck ? 0.78 : 1.12), Math.PI);
 
   if (police) {
-    // Black hood + roof on the white body, black door stripes, and a wide
+    // Black hood and roof on the white body, black door stripes, and a wide
     // light bar with glow halos and red/blue pools on the road.
-    placeBox(1.92, 0.1, 1.0, paintMat(0x14161a), 0, 0.94, 1.62);
-    placeBox(1.72, 0.08, 2.0, paintMat(0x14161a), 0, 1.48, -0.25);
+    addBox(1.92, 0.1, 1.0, paintFor(0x14161a), 0, 0.94, 1.62);
+    addBox(1.72, 0.08, 2.0, paintFor(0x14161a), 0, 1.48, -0.25);
     for (const s of [-1, 1]) {
-      placeBox(0.04, 0.3, 2.1, paintMat(0x14161a), s * 0.96, 0.72, -0.2);
+      addBox(0.04, 0.3, 2.1, paintFor(0x14161a), s * 0.96, 0.72, -0.2);
     }
-    placeBox(1.7, 0.16, 0.5, paintMat(0x222222), 0, 1.56, -0.25);
+    addBox(1.7, 0.16, 0.5, paintFor(0x222222), 0, 1.56, -0.25);
     const redLens = new THREE.Mesh(
       new THREE.BoxGeometry(0.78, 0.24, 0.46),
       new THREE.MeshBasicMaterial({ color: 0xff2a2a })
@@ -232,16 +235,16 @@ export function makeCar(color, police, kind) {
     );
     blueLens.position.set(0.44, 1.74, -0.25);
     group.add(blueLens);
-    const redHalo = glowSprite(0xff2a2a, 3.6);
+    const redHalo = makeGlow(0xff2a2a, 3.6);
     redHalo.position.set(-0.44, 1.78, -0.25);
     group.add(redHalo);
-    const blueHalo = glowSprite(0x2a6aff, 3.6);
+    const blueHalo = makeGlow(0x2a6aff, 3.6);
     blueHalo.position.set(0.44, 1.78, -0.25);
     group.add(blueHalo);
-    const redPool = groundPool('rgba(255,42,42,1)');
+    const redPool = lightPool('rgba(255,42,42,1)');
     redPool.position.set(-0.44, 0.04, -0.25);
     group.add(redPool);
-    const bluePool = groundPool('rgba(42,106,255,1)');
+    const bluePool = lightPool('rgba(42,106,255,1)');
     bluePool.position.set(0.44, 0.04, -0.25);
     group.add(bluePool);
     group.userData.redGlow = redHalo;
@@ -256,14 +259,14 @@ export function makeCar(color, police, kind) {
     // Checker band along the doors and a lit TAXI roof sign.
     for (const s of [-1, 1]) {
       for (let i = 0; i < 6; i++) {
-        placeBox(0.03, 0.22, 0.3,
-          paintMat(i % 2 ? 0x1c1e22 : 0xf2f2f2),
+        addBox(0.03, 0.22, 0.3,
+          paintFor(i % 2 ? 0x1c1e22 : 0xf2f2f2),
           s * 0.96, 0.78, -1.2 + i * 0.48);
       }
     }
     const roofSign = new THREE.Mesh(
       new THREE.BoxGeometry(0.9, 0.3, 0.4),
-      new THREE.MeshBasicMaterial({ map: taxiSignTex() })
+      new THREE.MeshBasicMaterial({ map: taxiSignTexture() })
     );
     roofSign.position.set(0, 1.62, -0.25);
     group.add(roofSign);
@@ -273,26 +276,26 @@ export function makeCar(color, police, kind) {
   // group that spins as a whole, so the hub turns with the tyre.
   const radius = truck ? 0.44 : 0.36;
   const tyreGeo = new THREE.CylinderGeometry(radius, radius, 0.26, 14);
-  const spinners = [];
-  const frontZ = len / 2 - 0.8;
-  const rearZ = -(len / 2 - 0.8);
-  for (const [sx, sz] of [[-0.95, frontZ], [0.95, frontZ], [-0.95, rearZ], [0.95, rearZ]]) {
+  const wheelGroups = [];
+  const frontAxle = len / 2 - 0.8;
+  const rearAxle = -(len / 2 - 0.8);
+  for (const [sx, sz] of [[-0.95, frontAxle], [0.95, frontAxle], [-0.95, rearAxle], [0.95, rearAxle]]) {
     const hub = new THREE.Group();
-    const tire = new THREE.Mesh(tyreGeo, [SHARED.tyre, hubMatFor(), hubMatFor()]);
+    const tire = new THREE.Mesh(tyreGeo, [MATS.tyre, hubFor(), hubFor()]);
     hub.add(tire);
     hub.rotation.z = Math.PI / 2;
     hub.position.set(sx, radius, sz);
     group.add(hub);
-    spinners.push(hub);
+    wheelGroups.push(hub);
   }
 
   // Bumpers and licence plates, front and rear.
   for (const end of [1, -1]) {
     const bz = end * (len / 2 + 0.02);
-    placeBox(1.95, 0.18, 0.22, SHARED.darkTrim, 0, 0.42, bz);
+    addBox(1.95, 0.18, 0.22, MATS.darkTrim, 0, 0.42, bz);
     const tag = new THREE.Mesh(
       new THREE.PlaneGeometry(0.52, 0.19),
-      new THREE.MeshBasicMaterial({ map: plateTexture(plateNo()) })
+      new THREE.MeshBasicMaterial({ map: plateTexture(plateNumber()) })
     );
     tag.position.set(0, 0.52, end * (len / 2 + 0.15));
     if (end < 0) tag.rotation.y = Math.PI;
@@ -304,24 +307,24 @@ export function makeCar(color, police, kind) {
   // widens ahead of the car, so it reads as a beam at dusk.
   const coneGeo = new THREE.ConeGeometry(1.1, 6.5, 10, 1, true);
   for (const side of [-1, 1]) {
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.08), SHARED.headlamp);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.08), MATS.headlamp);
     head.position.set(side * 0.62, 0.66, len / 2 + 0.01);
     group.add(head);
-    const glow = glowSprite(0xfff2b8, 1.5);
+    const glow = makeGlow(0xfff2b8, 1.5);
     glow.position.set(side * 0.62, 0.66, len / 2 + 0.25);
     group.add(glow);
-    const ray = new THREE.Mesh(coneGeo, SHARED.beam);
+    const ray = new THREE.Mesh(coneGeo, MATS.beam);
     ray.rotation.x = -Math.PI / 2;
     ray.position.set(side * 0.62, 0.52, len / 2 + 3.2);
     group.add(ray);
-    const rear = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.08), SHARED.tailLamp);
+    const rear = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.08), MATS.tailLamp);
     rear.position.set(side * 0.62, 0.66, -len / 2 - 0.01);
     group.add(rear);
-    const rearGlow = glowSprite(0xff3a3a, 1.1);
+    const rearGlow = makeGlow(0xff3a3a, 1.1);
     rearGlow.position.set(side * 0.62, 0.66, -len / 2 - 0.25);
     group.add(rearGlow);
   }
-  group.userData.wheels = spinners;
+  group.userData.wheels = wheelGroups;
   group.userData.police = !!police;
   group.userData.kind = model;
   return group;
@@ -331,26 +334,26 @@ export function makeCar(color, police, kind) {
 
 export function spawnParkedCar(x, z, heading, color, kind) {
   const mesh = makeCar(
-    color === undefined ? PAINT_COLOURS[Math.floor(Math.random() * PAINT_COLOURS.length)] : color,
+    color === undefined ? PAINTS[Math.floor(Math.random() * PAINTS.length)] : color,
     false, kind
   );
   mesh.position.set(x, 0, z);
   mesh.rotation.y = heading;
   S.scene.add(mesh);
   attachBlob(mesh, 4.6, 0.03);
-  const parked = { mesh, heading, speed: 0, steer: 0, police: false, parked: true, driver: null, kind: mesh.userData.kind };
-  S.cars.push(parked);
-  return parked;
+  const parkedCar = { mesh, heading, speed: 0, steer: 0, police: false, parked: true, driver: null, kind: mesh.userData.kind };
+  S.cars.push(parkedCar);
+  return parkedCar;
 }
 
 export function nearestCar(x, z, maxDist) {
   let closest = null;
-  let closestD = maxDist;
+  let bestD = maxDist;
   for (const candidate of S.cars) {
     if (candidate.driver) continue;
     const d = dist2(x, z, candidate.mesh.position.x, candidate.mesh.position.z);
-    if (d < closestD) {
-      closestD = d;
+    if (d < bestD) {
+      bestD = d;
       closest = candidate;
     }
   }
@@ -389,8 +392,8 @@ export function exitCar() {
 }
 
 export function updateDriving(dt) {
-  const auto = S.currentCar;
-  if (!auto) return;
+  const driven = S.currentCar;
+  if (!driven) return;
   const keys = S.keys;
   const forward = (keys.KeyW || keys.ArrowUp) ? 1 : 0;
   const reverse = (keys.KeyS || keys.ArrowDown) ? 1 : 0;
@@ -398,23 +401,23 @@ export function updateDriving(dt) {
   const turnR = (keys.KeyD || keys.ArrowRight) ? 1 : 0;
   const handbrake = !!keys.Space;
   const throttle = (forward - reverse) * (handbrake ? 0.3 : 1);
-  auto.speed += throttle * 16 * dt;
-  if (!forward && !reverse) auto.speed *= Math.max(0, 1 - dt * 1.4);
-  if (handbrake) auto.speed *= Math.max(0, 1 - dt * 3.2);
-  auto.speed = clamp(auto.speed, -10, WORLD.playerTopSpeed);
-  const steerGoal = (turnL - turnR) * 0.55 * Math.min(1, Math.abs(auto.speed) / 8);
-  auto.steer += (steerGoal - auto.steer) * Math.min(1, dt * 6);
-  auto.heading += auto.steer * dt * (auto.speed >= 0 ? 1 : -1) * Math.sign(auto.speed || 1);
-  const nextX = auto.mesh.position.x + Math.sin(auto.heading) * auto.speed * dt;
-  const nextZ = auto.mesh.position.z + Math.cos(auto.heading) * auto.speed * dt;
+  driven.speed += throttle * 16 * dt;
+  if (!forward && !reverse) driven.speed *= Math.max(0, 1 - dt * 1.4);
+  if (handbrake) driven.speed *= Math.max(0, 1 - dt * 3.2);
+  driven.speed = clamp(driven.speed, -10, WORLD.playerTopSpeed);
+  const steerGoal = (turnL - turnR) * 0.55 * Math.min(1, Math.abs(driven.speed) / 8);
+  driven.steer += (steerGoal - driven.steer) * Math.min(1, dt * 6);
+  driven.heading += driven.steer * dt * (driven.speed >= 0 ? 1 : -1) * Math.sign(driven.speed || 1);
+  const nextX = driven.mesh.position.x + Math.sin(driven.heading) * driven.speed * dt;
+  const nextZ = driven.mesh.position.z + Math.cos(driven.heading) * driven.speed * dt;
   const at = { x: nextX, z: nextZ };
   resolveCollisions(at, 1.9);
   // Ease off for other cars ahead (formation-pacing cruisers never block).
-  for (const obstacle of [...S.cars, ...S.trafficCars, ...S.cruisers]) {
-    if (obstacle === auto || obstacle.mesh === auto.mesh) continue;
-    if (obstacle.pace) continue; // a pacing cruiser holds formation, not a block
-    const ox = obstacle.mesh ? obstacle.mesh.position.x : obstacle.position.x;
-    const oz = obstacle.mesh ? obstacle.mesh.position.z : obstacle.position.z;
+  for (const other of [...S.cars, ...S.trafficCars, ...S.cruisers]) {
+    if (other === driven || other.mesh === driven.mesh) continue;
+    if (other.pace) continue; // a pacing cruiser holds formation, not a block
+    const ox = other.mesh ? other.mesh.position.x : other.position.x;
+    const oz = other.mesh ? other.mesh.position.z : other.position.z;
     const gap = dist2(at.x, at.z, ox, oz);
     if (gap < 4.5) {
       const shove = (4.5 - gap) * 0.5;
@@ -423,37 +426,37 @@ export function updateDriving(dt) {
       const len = Math.hypot(dx, dz) || 1;
       at.x += (dx / len) * shove;
       at.z += (dz / len) * shove;
-      auto.speed *= 0.92;
+      driven.speed *= 0.92;
     }
   }
   // Pedestrians get shoved aside by the car (they dodge first — see traffic.js).
-  for (const walker of S.peds) {
-    const gap = dist2(at.x, at.z, walker.mesh.position.x, walker.mesh.position.z);
+  for (const ped of S.peds) {
+    const gap = dist2(at.x, at.z, ped.mesh.position.x, ped.mesh.position.z);
     if (gap < 2.4) {
-      const dx = walker.mesh.position.x - at.x;
-      const dz = walker.mesh.position.z - at.z;
+      const dx = ped.mesh.position.x - at.x;
+      const dz = ped.mesh.position.z - at.z;
       const len = Math.hypot(dx, dz) || 1;
-      walker.mesh.position.x += (dx / len) * 1.2;
-      walker.mesh.position.z += (dz / len) * 1.2;
-      walker.fleeTimer = Math.max(walker.fleeTimer, 1.2);
-      walker.stumble = 0.5;
-      auto.speed *= 0.94;
+      ped.mesh.position.x += (dx / len) * 1.2;
+      ped.mesh.position.z += (dz / len) * 1.2;
+      ped.fleeTimer = Math.max(ped.fleeTimer, 1.2);
+      ped.stumble = 0.5;
+      driven.speed *= 0.94;
     }
   }
-  auto.mesh.position.x = at.x;
-  auto.mesh.position.z = at.z;
-  auto.mesh.rotation.y = auto.heading;
+  driven.mesh.position.x = at.x;
+  driven.mesh.position.z = at.z;
+  driven.mesh.rotation.y = driven.heading;
   // Wheel spin — the whole wheel group turns, hub included.
-  for (const wheel of auto.mesh.userData.wheels) wheel.rotation.x += auto.speed * dt * 2.4;
+  for (const wheel of driven.mesh.userData.wheels) wheel.rotation.x += driven.speed * dt * 2.4;
   // Player rides along: keep the on-foot body at the car for the camera.
   const player = S.player;
   player.pos.x = at.x;
   player.pos.z = at.z;
-  player.heading = auto.heading;
-  S.speedKmh = Math.abs(auto.speed) * 3.6;
-  if (S.audio) S.audio.engine(Math.abs(auto.speed) / WORLD.playerTopSpeed, !!auto);
-  if (Math.abs(auto.speed) > 4) addHeat(0); // no-op guard: driving alone adds no heat
-  updateChaseCamera(dt, auto);
+  player.heading = driven.heading;
+  S.speedKmh = Math.abs(driven.speed) * 3.6;
+  if (S.audio) S.audio.engine(Math.abs(driven.speed) / WORLD.playerTopSpeed, !!driven);
+  if (Math.abs(driven.speed) > 4) addHeat(0); // no-op guard: driving alone adds no heat
+  updateChaseCamera(dt, driven);
 }
 
 function updateChaseCamera(dt, car) {
@@ -466,21 +469,21 @@ function updateChaseCamera(dt, car) {
   const back = 9.5; // follow distance: far enough that the car reads as a
   // car in a street, not a wall filling the lower frame
   const rideH = 2.6;
-  const wantX = car.mesh.position.x - Math.sin(car.heading) * back;
-  const wantZ = car.mesh.position.z - Math.cos(car.heading) * back;
-  const wantY = rideH;
+  const goalX = car.mesh.position.x - Math.sin(car.heading) * back;
+  const goalZ = car.mesh.position.z - Math.cos(car.heading) * back;
+  const goalY = rideH;
   // Hard follow (dt*25): effectively instant in slow headless frames, so
   // the camera never lags a whole street behind a 122 km/h car, and it
   // stays smooth at 60 fps on a real machine.
-  const pull = Math.min(1, dt * 25);
-  camera.position.x += (wantX - camera.position.x) * pull;
-  camera.position.y += (wantY - camera.position.y) * pull;
-  camera.position.z += (wantZ - camera.position.z) * pull;
+  const follow = Math.min(1, dt * 25);
+  camera.position.x += (goalX - camera.position.x) * follow;
+  camera.position.y += (goalY - camera.position.y) * follow;
+  camera.position.z += (goalZ - camera.position.z) * follow;
   camera.lookAt(car.mesh.position.x, 2.4, car.mesh.position.z);
   // Speed feel: the field of view opens a little as the car accelerates,
   // 55 at rest to 67 at top speed. Eased, so it never jumps.
-  const pace = Math.min(1, Math.abs(car.speed) / WORLD.playerTopSpeed);
-  const wantFov = 55 + pace * 12;
-  camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6);
+  const speedRatio = Math.min(1, Math.abs(car.speed) / WORLD.playerTopSpeed);
+  const targetFov = 55 + speedRatio * 12;
+  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 6);
   camera.updateProjectionMatrix();
 }

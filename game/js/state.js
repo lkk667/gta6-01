@@ -1,14 +1,16 @@
-// Solmar City — shared state.
-// One mutable world object every system reads and writes. No network, no
-// imports from other game modules: this file stands alone.
+// Solmar City — shared world state.
+// One plain object every system reads and writes. It holds the run, the
+// player's stats, the mission progress, the live handles, and the UI
+// queues. It imports nothing from the other game modules, so nothing can
+// tangle: every other file imports from here, never the reverse.
 
 export const WORLD = {
   size: 380,
   half: 190,
   roadGap: 40,
   roads: [-160, -120, -80, -40, 0, 40, 80, 120, 160],
-  playerTopSpeed: 34, // units per second on the road
-  cruiserBaseSpeed: 32, // cruisers keep pace with (and can catch) the player
+  playerTopSpeed: 34, // metres per second on the road
+  cruiserBaseSpeed: 32, // cruisers keep pace with the player and can catch them
   cruiserPerStar: 1.5,
 };
 
@@ -23,44 +25,50 @@ export const LANDMARKS = {
 };
 
 export const S = {
-  // run state
+  // Run.
   mode: 'menu', // 'menu' | 'playing' | 'busted'
   time: 0,
   version: 4,
   saveLoaded: false,
-  // player stats
+  freeRoam: false,
+  // Player stats.
   cash: 0,
   health: 100,
   maxHealth: 100,
   magazine: 12,
   magSize: 12,
   reserve: 60,
-  heat: 0, // 0..100, maps to 0..5 stars
-  // mission progress
+  heat: 0, // 0..100, maps onto 0..5 wanted stars
+  // Missions.
   missionsCompleted: 0,
   missionIndex: 0,
-  missionStage: 0, // per-mission sub-stage (e.g. 0 = steal a car, 1 = drive to garage)
+  missionStage: 0, // sub-stage inside the current mission
   objectiveText: '',
-  objectiveDist: null, // metres to the current target, null = show no distance
-  // movement
+  objectiveDist: null, // metres to the target, null hides the distance
+  // Movement and arrest.
   onFoot: true,
   speedKmh: 0,
   bustTimer: 0,
   bustedAt: null,
-  // three.js handles, filled in by main.js / builders
+  // Three.js handles, filled in by main.js and the builders.
   scene: null,
   camera: null,
   renderer: null,
   clock: null,
-  player: null, // { group, body, head, gun, flash, pos: {x,z}, heading, speed, ... }
-  cars: [], // parked + stolen drivable cars (vehicles.js records)
-  trafficCars: [],
-  peds: [],
+  sun: null,
+  clouds: [],
+  player: null, // { group, torso, head, legL, legR, armL, armR, gun, flashMat, flashLight, pos, heading, speed, walkPhase, weapon, punchTimer, flashTimer }
+  currentCar: null, // the car the player is driving, or null on foot
+  cars: [], // parked + stolen drivable cars (vehicles.js)
+  trafficCars: [], // the 28 moving traffic cars (traffic.js)
+  peds: [], // the 40 pedestrians (traffic.js)
   cruisers: [],
   pickups: [],
   colliders: [], // { x, z, r } circles the player and cars must not enter
-  beacon: null, // { group, ring, pillar, gem, target: {x,z} }
-  // ui + input
+  benches: [], // { x, z } seats a pedestrian can sit on (city.js fills this)
+  trafficLights: null, // [{ x, z, red, yellow, green }] (city.js fills this)
+  beacon: null, // { group, ring, ... } the gold mission marker (missions.js)
+  // UI and input.
   toasts: [],
   toastSeq: 0,
   keys: {},
@@ -73,9 +81,10 @@ export const S = {
   dragOrbit: false,
   muted: false,
   audio: null,
-  debug: { longRewardToast: false, holdFlash: false, staged: null },
+  debug: { longRewardToast: false, holdFlash: false, staged: null, holdReward: false, freezeTraffic: false, freezePolice: false, noSpawn: false, pacing: false },
 };
 
+// Wanted stars from heat: 0 below 1, then a star at each cut.
 const STAR_CUTS = [20, 40, 60, 85];
 
 export function starsFromHeat(heat) {
@@ -88,6 +97,7 @@ export function starsFromHeat(heat) {
   return stars;
 }
 
+// Heat stays inside 0..100 no matter how much is added or removed.
 export function addHeat(amount) {
   S.heat = Math.max(0, Math.min(100, S.heat + amount));
 }
@@ -96,7 +106,7 @@ export function clearToasts() {
   S.toasts.length = 0;
 }
 
-// Push a banner. `life` seconds, default 5. Oldest banners drop past 4.
+// A banner on the HUD. `life` seconds, default 5. Past four, the oldest drops.
 export function toast(text, sub, life) {
   const entry = {
     id: ++S.toastSeq,
@@ -109,7 +119,7 @@ export function toast(text, sub, life) {
   return entry;
 }
 
-// Deterministic PRNG so the city layout is stable between runs.
+// Deterministic PRNG: the same seed paints the same city on every run.
 export function mulberry32(seed) {
   let state = seed >>> 0;
   return function () {
@@ -127,13 +137,15 @@ export function clamp(v, lo, hi) {
   return v;
 }
 
+// Straight-line distance on the ground plane. (Named dist2 for history;
+// it returns real metres, not a squared distance.)
 export function dist2(ax, az, bx, bz) {
   const dx = ax - bx;
   const dz = az - bz;
   return Math.hypot(dx, dz);
 }
 
-// Nearest road coordinate to a value (roads every 40 units).
+// Nearest road coordinate to a value. Roads run every 40 units.
 export function nearestRoad(v) {
   return Math.round(v / WORLD.roadGap) * WORLD.roadGap;
 }

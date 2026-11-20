@@ -22,13 +22,13 @@ export function buildInput() {
     for (const k of Object.keys(S.keys)) S.keys[k] = false;
   });
 
-  const cv = document.getElementById('game');
+  const canvas = document.getElementById('game');
   // Click the canvas to lock the mouse for looking around. A click also
   // fires the shoot handler in main.js; the two listeners do not clash.
-  cv.addEventListener('mousedown', (e) => {
+  canvas.addEventListener('mousedown', (e) => {
     if (S.mode !== 'playing') return;
     if (e.button === 0 && !S.pointerLocked) {
-      try { cv.requestPointerLock(); } catch (_) { /* drag-orbit fallback */ }
+      try { canvas.requestPointerLock(); } catch (_) { /* drag-orbit fallback */ }
     }
     if (e.button === 0) S.dragOrbit = true;
   });
@@ -36,7 +36,7 @@ export function buildInput() {
     S.dragOrbit = false;
   });
   document.addEventListener('pointerlockchange', () => {
-    S.pointerLocked = document.pointerLockElement === cv;
+    S.pointerLocked = document.pointerLockElement === canvas;
   });
   document.addEventListener('mousemove', (e) => {
     if (S.pointerLocked) {
@@ -48,8 +48,8 @@ export function buildInput() {
     }
   });
   // Mouse wheel zooms the chase / third-person camera in and out.
-  cv.addEventListener('wheel', (e) => {
-    if (S.mode !== 'playing') return;
+  canvas.addEventListener('wheel', (e) => {
+    if (S.mode === 'playing') return;
     S.camDist = Math.min(16, Math.max(4, S.camDist + Math.sign(e.deltaY) * 1.2));
   }, { passive: true });
 }

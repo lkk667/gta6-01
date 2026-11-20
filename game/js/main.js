@@ -3,15 +3,15 @@
 // screenshot scenes the entry is judged on. The staging helpers put the
 // player, the cars and the cops in exact poses; the harness drives them
 // through ?autostart=1&staging=...
-// A low sun glow hangs over the south-western horizon so the dusk sky
-// has a light source, not just a gradient.
+// A low sun glow hangs over the south-western horizon so the dusk sky has
+// a light source, not just a gradient.
 
 import * as THREE from '../vendor/three.module.min.js';
 import { S, WORLD, LANDMARKS, toast, clearToasts } from './state.js';
 import { buildCity, updateBlobShadows, updateTrafficLights } from './city.js';
 import { buildPlayer, updatePlayer, updateCamera } from './player.js';
 import { spawnParkedCar, nearestCar, enterCar, exitCar, updateDriving } from './vehicles.js';
-import { buildTraffic, updateTraffic, updatePeds } from './traffic.js';
+import { buildTraffic, updateTraffic, updatePeds, reportCrime } from './traffic.js';
 import { updatePolice, spawnCruiser, makeOfficer, triggerBusted } from './police.js';
 import { startMission, updateMissions, updateBeacon, debugCompleteMission1 } from './missions.js';
 import { buildCombat, shoot, punch, reload, updateCombat } from './combat.js';
@@ -44,10 +44,10 @@ function setupLights() {
   S.scene.add(sun.target);
   S.sun = sun;
   // Sunset environment map: a tiny gradient sky baked through PMREM, so
-  // clearcoat paint, glass and chrome pick up the orange-gold horizon
-  // and the violet zenith instead of reflecting nothing. Built once at
-  // boot — zero cost per frame. Kept dim so it lifts materials without
-  // washing out the dusk lighting.
+  // clearcoat paint, glass and chrome pick up the orange-gold horizon and
+  // the violet zenith instead of reflecting nothing. Built once at boot —
+  // zero cost per frame. Kept dim so it lifts materials without washing
+  // out the dusk lighting.
   const pmrem = new THREE.PMREMGenerator(S.renderer);
   const envWorld = new THREE.Scene();
   const envCv = document.createElement('canvas');
@@ -152,7 +152,12 @@ function pollInteract(dt) {
   if (eDown && !eWas) {
     if (S.onFoot) {
       const car = nearestCar(S.player.pos.x, S.player.pos.z, 3.5);
-      if (car) enterCar(car);
+      if (car) {
+        // Stealing a car in the open is witnessed: anyone close sees it.
+        const wasStolen = car.stolen === true;
+        enterCar(car);
+        if (!wasStolen) reportCrime(car.mesh.position.x, car.mesh.position.z, 30);
+      }
     } else {
       exitCar();
     }
@@ -287,12 +292,13 @@ export function stageCity() {
   S.debug.freezeTraffic = true; // traffic holds still so no car drives
   // through the frame and parks on the camera during the 6 s wait
   S.objectiveText = 'Lose the cops — get your wanted level to zero';
-  // A cruiser ahead with an officer standing beside it.
-  const cop = spawnCruiser(0, -16);
-  cop.mesh.position.set(0, 0, -16);
+  // A cruiser ahead with an officer standing beside it, close enough to
+  // read in the frame.
+  const cop = spawnCruiser(0, -13);
+  cop.mesh.position.set(0, 0, -13);
   cop.heading = 0;
   cop.speed = 0;
-  makeOfficer(2.6, -13.5, Math.PI * 0.85);
+  makeOfficer(3.2, -11, Math.PI * 0.85);
   // Keep the frame clear of stray traffic right by the player.
   for (const t of S.trafficCars) {
     if (Math.abs(t.mesh.position.x) >= 12 || Math.abs(t.mesh.position.z) >= 12) continue;
@@ -301,24 +307,52 @@ export function stageCity() {
   // Foreground interest, so the lower frame is a street, not bare pavement:
   // a car parked at the left kerb, just ahead of the camera.
   spawnParkedCar(-4, 1.5, 0, 0x3a7ad8);
-  // Street life in frame: two pedestrians crossing ahead, one fleeing the
-  // shot, and one more crossing close to the camera on the right.
-  placeWalkers([[3.5, -8, 0.4], [-4, -6, -0.5], [-1.5, -22, 2.8], [4.5, 3.5, -2.0]]);
+  // Street life in frame, close to the player so the flee still reads at
+  // the 8 s shutter: two pedestrians crossing ahead, one walking further
+  // out, and one more to the side. The shot itself (fireAndHold) makes
+  // the nearby ones flee with their arms up.
+  placeWalkers([[3, -5, 0.4, 'cross'], [-3.5, -4.5, -0.5, 'cross'], [-1, -16, 2.8, 'walk'], [6, -2, -2.0, 'walk']]);
   // One shot, flash held open for the camera.
   fireAndHold();
 }
 
-// Move the first few pedestrians to fixed spots (x, z, heading) so a staged
-// shot has street life in frame instead of an empty street.
+// Move the first few pedestrians to fixed spots (x, z, heading, mode) so a
+// staged shot has street life in frame instead of an empty street. A
+// fifth element links a talking pair: the index of the partner placement.
+// Staged walkers hold their pose for 30 s, so they are still in frame at
+// the 8 s shutter instead of wandering off.
 function placeWalkers(placements) {
   for (let i = 0; i < placements.length; i++) {
     const walker = S.peds[i];
     if (!walker) continue;
-    const [px, pz, hd] = placements[i];
+    const [px, pz, hd, mode] = placements[i];
     walker.mesh.position.set(px, 0, pz);
     walker.heading = hd;
     walker.fleeTimer = 0;
     walker.retarget = 5;
+    walker.partner = null;
+    if (mode) {
+      walker.mode = mode;
+      walker.stateT = 30;
+      walker.phone.visible = false;
+      walker.head.rotation.x = 0;
+    }
+  }
+  // Second pass: link talking pairs and face them at each other.
+  for (let i = 0; i < placements.length; i++) {
+    const partnerIdx = placements[i][4];
+    if (partnerIdx === undefined || partnerIdx === null || partnerIdx < 0) continue;
+    const walker = S.peds[i];
+    const other = S.peds[partnerIdx];
+    if (!walker || !other) continue;
+    walker.partner = other;
+    other.partner = walker;
+    walker.mode = 'talk';
+    other.mode = 'talk';
+    walker.stateT = 30;
+    other.stateT = 30;
+    walker.heading = Math.atan2(other.mesh.position.x - walker.mesh.position.x, other.mesh.position.z - walker.mesh.position.z);
+    other.heading = Math.atan2(walker.mesh.position.x - other.mesh.position.x, walker.mesh.position.z - other.mesh.position.z);
   }
 }
 
@@ -339,13 +373,18 @@ export function stageMission() {
   player.group.position.set(-40, 0, -80);
   player.heading = Math.PI / 2; // facing east, down road z=-80 toward the tower
   S.camYaw = -Math.PI / 2;
-  S.camPitch = -0.38; // camera low, looking up steeply: the 130 m tower fills
-  // the frame and the near pavement drops out of the lower frame
-  S.camDist = 8.5;
-  // Two walkers further down the road for depth, plus one more in the
-  // lower-left foreground, far enough out (about 8 m) that its top stays
-  // below the frame centre and it does not hide the player or the tower.
-  placeWalkers([[-20, -82, 1.2], [-10, -78, -1.0], [-41.4, -83.5, 0.6]]);
+  // Framing fix: the camera used to sit almost on the ground looking up
+  // (pitch clamped to -0.15), so the near pavement filled the bottom half
+  // of the frame. Raised to 0.22 at 10 m, the camera looks nearly level:
+  // the tower fills the upper frame and the near pavement drops out.
+  S.camPitch = 0.22;
+  S.camDist = 10;
+  // Street life: a talking pair further down the road for depth, a waiter
+  // at the kerb in the lower-left foreground, one more walker on the
+  // north sidewalk close to the camera, and one waiting at the south
+  // kerb in the lower-right foreground, so the lower frame has people
+  // in it instead of bare pavement.
+  placeWalkers([[-20, -82, 1.2, 'talk', 1], [-18.5, -82, -1.2, 'talk', 0], [-41.4, -83.5, 0.6, 'wait'], [-46, -73.5, -1.6, 'wait'], [-44, -71, 0.5, 'wait']]);
   debugCompleteMission1();
   // debugCompleteMission1 teleports the player to the park; put them back
   // on the road with the tower in view.
@@ -353,12 +392,12 @@ export function stageMission() {
   player.pos.z = -80;
   player.group.position.set(-40, 0, -80);
   player.heading = Math.PI / 2;
-  // A car parked in the lower-right foreground, far enough out (about
-  // 13 m from the camera now, was about 8 m) that it reads as a car in
-  // the street instead of filling the frame: its roof stays below the
-  // frame centre and its plate is fully in frame, not cut off at the
-  // right edge.
-  spawnParkedCar(-37.5, -73.5, Math.PI / 2, 0xd84a4a);
+  // A car parked in the lower-right foreground, close enough to the
+  // camera (about 8 m now) that it reads as a car in the street and
+  // fills the lower frame instead of leaving it bare: its roof stays
+  // below the frame centre and its plate is fully in frame, not cut
+  // off at the right edge.
+  spawnParkedCar(-43, -75, Math.PI / 2, 0xd84a4a);
   // The completion banner stands alone; the objective line reports the
   // payout instead of the stale "pick up" instruction at 0 m.
   S.objectiveText = 'Mission 1 complete — $300 earned';
@@ -370,28 +409,30 @@ export function stageFoot() {
   S.debug.staged = 'foot';
   // The mission-start toast sits over the CAFE LUNA sign in headless runs
   // (game time lags real time there, so the 6 s toast is still up at the
-  // 8 s shutter). Clear it for the shot; the objective line stays.
+  // 8 s shutter). Clear it for the shot; the objective line is cleared
+  // too — it sat across the sign itself.
   clearToasts();
   const player = S.player;
-  // On road z=-40, facing Cafe Luna. Framing math: the rooftop sign tops
-  // out at y≈17, so the camera must sit low and look UP — camPitch is
-  // negative here (pitch raises the camera and looks down, which hides the
-  // sign; the first attempt used +0.24 and lost the sign completely).
-  // camDist 11 + pitch -0.1 puts the sign top just inside the frame, and
-  // the closer camera leaves less empty pavement in the lower frame.
+  // On road z=-40, facing Cafe Luna. Framing: the rooftop sign tops out
+  // at y≈17, so the camera must sit low and look UP — but the old pitch
+  // (-0.1) put the camera almost on the ground and the near pavement
+  // filled the bottom 40% of the frame. Pitch -0.02 at 12 m keeps the
+  // whole CAFE LUNA sign in frame while the parked cars and the
+  // foreground walker still fill the lower frame.
   player.pos.x = -60;
   player.pos.z = -40;
   player.group.position.set(-60, 0, -40);
   player.heading = Math.PI; // facing north, walking toward Cafe Luna
   S.camYaw = 0; // camera south of the player, looking north at the sign
-  S.camPitch = -0.1;
-  S.camDist = 11;
-  S.objectiveText = 'Pick up the package at the Hideout';
-  // Cafe street life: a couple at the outdoor tables, one on the sidewalk,
-  // plus one more walker close to the camera on the left, so the lower
-  // frame has a person in it instead of bare pavement. (The walker sits
-  // just left of the camera's line of sight, close enough to read large.)
-  placeWalkers([[-54, -47, -2.2], [-66, -47, 2.2], [-57, -43, 0.6], [-64, -52, 0.2], [-61.5, -33.5, 0.3]]);
+  S.camPitch = -0.02;
+  S.camDist = 12;
+  S.objectiveText = '';
+  S.objectiveDist = null;
+  // Cafe street life, each doing something different: a talking pair at
+  // the outdoor tables, one on the phone by the cafe, one sitting on a
+  // chair, and one waiting at the kerb close to the camera so the lower
+  // frame has a person in it instead of bare pavement.
+  placeWalkers([[-54, -47, -2.2, 'talk', 1], [-57, -47, 2.2, 'talk', 0], [-66, -47, 0.8, 'phone'], [-61.3, -49.5, 0, 'sit'], [-60, -33.5, 0.3, 'wait']]);
   // A taxi waiting at the kerb in the left foreground, for depth, and a
   // car parked just ahead of the camera on the right, to balance the
   // lower frame. Both sit close to the camera's line of sight.
@@ -458,6 +499,7 @@ function boot() {
     fireAndHold, stageReward, shoot, punch, reload,
     enterCar, exitCar, nearestCar, spawnCruiser, triggerBusted,
     startMission, debugCompleteMission1, saveGame, loadSave,
+    reportCrime,
   };
 
   // Staging entry: ?autostart=1&staging=chase|city|mission|foot

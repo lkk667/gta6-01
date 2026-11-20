@@ -1,8 +1,8 @@
-// Solmar City — wanted level, police cruisers, BUSTED.
-// Cruisers are faster than the player now (32 + 1.5/star vs the player's
-// 34), so a chase stays a chase; their light bars flash red/blue with
-// glow halos. The officer on the street is built to read as a person —
-// tapered uniform, neck, a head that is small next to the shoulders —
+// Solmar City — the wanted level, police cruisers, BUSTED.
+// Cruisers run faster than the player now (32 + 1.5 per star, against the
+// player's 34), so a chase stays a chase; their light bars flash red and
+// blue with glow halos. The officer on the street is shaped to read as a
+// person — a tapered uniform, a neck, a head small beside the shoulders —
 // with the badge, belt, holster, radio, patch and name tag that mark the
 // uniform.
 
@@ -11,11 +11,11 @@ import { S, WORLD, starsFromHeat, addHeat, dist2, clamp } from './state.js';
 import { makeCar } from './vehicles.js';
 import { resolveCollisions, attachBlob } from './city.js';
 
-let spawnClock = 0;
+let spawnTimer = 0;
 
-// One place for the light-bar flash state: lenses, glow halos, and the
-// red/blue pools on the road under the cruiser.
-function setFlash(data, isRed) {
+// One place for the light-bar flash state: the lenses, the glow halos,
+// and the red/blue pools on the road under the cruiser.
+function flashBar(data, isRed) {
   if (!data.redLens) return;
   data.redLens.material.color.set(isRed ? 0xff2a2a : 0x5a1414);
   data.blueLens.material.color.set(isRed ? 0x142a5a : 0x2a6aff);
@@ -33,7 +33,7 @@ export function wantedStars() {
 
 export function spawnCruiser(nearX, nearZ) {
   const mesh = makeCar(0, true);
-  // Spawn ~50 m away, on a road if possible.
+  // Spawn about 50 m away, on a road when possible.
   const a = Math.random() * Math.PI * 2;
   let sx = nearX + Math.sin(a) * 50;
   let sz = nearZ + Math.cos(a) * 50;
@@ -49,7 +49,7 @@ export function spawnCruiser(nearX, nearZ) {
   return cruiser;
 }
 
-function dropCruiser(cruiser) {
+function removeCruiser(cruiser) {
   S.scene.remove(cruiser.mesh);
   const i = S.cruisers.indexOf(cruiser);
   if (i >= 0) S.cruisers.splice(i, 1);
@@ -62,14 +62,14 @@ export function updatePolice(dt) {
     const moving = S.onFoot ? (S.player && S.player.speed > 1) : !!S.currentCar;
     addHeat(-dt * (moving ? 0.9 : 1.8));
   }
-  spawnClock -= dt;
+  spawnTimer -= dt;
   const count = wanted === 0 ? 0 : Math.min(wanted + 1, 5);
-  if (wanted > 0 && S.cruisers.length < count && spawnClock <= 0 && !S.debug.pacing && !S.debug.noSpawn) {
-    spawnClock = 1.2;
+  if (wanted > 0 && S.cruisers.length < count && spawnTimer <= 0 && !S.debug.pacing && !S.debug.noSpawn) {
+    spawnTimer = 1.2;
     spawnCruiser(S.player.pos.x, S.player.pos.z);
   }
   if (wanted === 0 && S.cruisers.length > 0 && Math.random() < dt * 0.3) {
-    dropCruiser(S.cruisers[0]);
+    removeCruiser(S.cruisers[0]);
   }
 
   const playerX = S.player.pos.x;
@@ -85,7 +85,7 @@ export function updatePolice(dt) {
       // Staged shot: the cruiser holds its pose (lights still flash below).
       c.mesh.rotation.y = c.heading;
       c.flashPhase += dt * 7;
-      setFlash(c.mesh.userData, Math.sin(c.flashPhase) > 0);
+      flashBar(c.mesh.userData, Math.sin(c.flashPhase) > 0);
       continue;
     }
     if (S.debug.pacing && c.pace && S.currentCar) {
@@ -137,7 +137,7 @@ export function updatePolice(dt) {
     // Flashing light bar: alternate red / blue, glow sprites pulse with it,
     // and the red/blue ground reflections under the cruiser pulse too.
     c.flashPhase += dt * 7;
-    setFlash(c.mesh.userData, Math.sin(c.flashPhase) > 0);
+    flashBar(c.mesh.userData, Math.sin(c.flashPhase) > 0);
     if (S.audio && d < 60) S.audio.siren(d);
   }
 
@@ -163,7 +163,7 @@ export function triggerBusted() {
   S.bustedAt = S.time;
   S.heat = 0;
   S.bustTimer = 0;
-  for (const c of [...S.cruisers]) dropCruiser(c);
+  for (const c of [...S.cruisers]) removeCruiser(c);
   if (S.currentCar) {
     S.currentCar.driver = null;
     S.currentCar = null;
@@ -210,18 +210,18 @@ export function makeOfficer(x, z, heading) {
   brim.position.set(0, 1.8, 0.24);
   officer.add(brim);
   // Two slim legs with a gap, pivoting at the hip.
-  const legShape = new THREE.BoxGeometry(0.17, 0.72, 0.19);
-  legShape.translate(0, -0.36, 0);
-  const leftLeg = new THREE.Mesh(legShape, uniform);
+  const legGeo = new THREE.BoxGeometry(0.17, 0.72, 0.19);
+  legGeo.translate(0, -0.36, 0);
+  const leftLeg = new THREE.Mesh(legGeo, uniform);
   leftLeg.position.set(-0.12, 0.72, 0);
   officer.add(leftLeg);
   const rightLeg = leftLeg.clone();
   rightLeg.position.x = 0.12;
   officer.add(rightLeg);
   // Arms at the sides, one hand resting on the holster.
-  const armShape = new THREE.BoxGeometry(0.14, 0.6, 0.16);
-  armShape.translate(0, -0.3, 0);
-  const leftArm = new THREE.Mesh(armShape, uniform);
+  const armGeo = new THREE.BoxGeometry(0.14, 0.6, 0.16);
+  armGeo.translate(0, -0.3, 0);
+  const leftArm = new THREE.Mesh(armGeo, uniform);
   leftArm.position.set(-0.32, 1.38, 0);
   officer.add(leftArm);
   const rightArm = leftArm.clone();

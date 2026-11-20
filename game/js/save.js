@@ -5,13 +5,13 @@
 
 import { S } from './state.js';
 
-const SAVE_KEY = 'solmar-city-save-v4';
-const SAVE_VERSION = 4;
+const STORAGE_KEY = 'solmar-city-save-v4';
+const STORAGE_VERSION = 4;
 
 export function saveGame() {
   try {
-    const data = {
-      version: SAVE_VERSION,
+    const payload = {
+      version: STORAGE_VERSION,
       cash: S.cash,
       missionsCompleted: S.missionsCompleted,
       missionIndex: S.missionIndex,
@@ -20,7 +20,7 @@ export function saveGame() {
       playerX: S.player ? S.player.pos.x : 0,
       playerZ: S.player ? S.player.pos.z : 0,
     };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch (_) {
     // Storage can be unavailable (private mode, quota); the game keeps
     // running and the menu simply shows no Continue button.
@@ -29,26 +29,26 @@ export function saveGame() {
 
 export function loadSave() {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (!data || data.version !== SAVE_VERSION) return null;
-    return data;
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return null;
+    const record = JSON.parse(stored);
+    if (!record || record.version !== STORAGE_VERSION) return null;
+    return record;
   } catch (_) {
     return null;
   }
 }
 
-export function applySave(saved) {
-  if (!saved) return;
-  S.cash = saved.cash || 0;
-  S.missionsCompleted = saved.missionsCompleted || 0;
-  S.missionIndex = saved.missionIndex || 0;
-  S.freeRoam = !!saved.freeRoam;
-  S.health = saved.health != null ? saved.health : 100;
-  if (S.player && saved.playerX != null && saved.playerZ != null) {
-    S.player.pos.x = saved.playerX;
-    S.player.pos.z = saved.playerZ;
-    S.player.group.position.set(saved.playerX, 0, saved.playerZ);
+export function applySave(record) {
+  if (!record) return;
+  S.cash = record.cash || 0;
+  S.missionsCompleted = record.missionsCompleted || 0;
+  S.missionIndex = record.missionIndex || 0;
+  S.freeRoam = !!record.freeRoam;
+  S.health = record.health != null ? record.health : 100;
+  if (S.player && record.playerX != null && record.playerZ != null) {
+    S.player.pos.x = record.playerX;
+    S.player.pos.z = record.playerZ;
+    S.player.group.position.set(record.playerX, 0, record.playerZ);
   }
 }

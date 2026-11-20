@@ -505,6 +505,9 @@ function layPark() {
     const bx = cx - 10 + i * 7;
     addBox(3, 0.5, 1, flat(0x8a6a42), bx, 0.25, cz - 8);
     addBox(3, 0.5, 1, flat(0x8a6a42), bx, 0.25, cz + 8);
+    // Park benches are seats too: record them so a pedestrian can sit.
+    S.benches.push({ x: bx, z: cz - 8 });
+    S.benches.push({ x: bx, z: cz + 8 });
   }
 }
 
@@ -983,6 +986,8 @@ function laySidewalkProps() {
     instanced.castShadow = shadow;
     S.scene.add(instanced);
   };
+  // Sidewalk benches are seats too: record them for sitting pedestrians.
+  for (const [bx, bz] of benches) S.benches.push({ x: bx, z: bz });
   fill(
     new THREE.BoxGeometry(2.2, 0.5, 0.7),
     flat(0x8a6a42), benches, 0.25, true
