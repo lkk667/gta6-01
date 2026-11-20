@@ -251,16 +251,33 @@ export function stageChase() {
       shifted++;
     }
   }
+  // Pedestrians wander onto the chase route as well — one was standing
+  // right beside the getaway car in the cover, about to be run over.
+  // Shove any ped on road x=0 (z 20..180) well clear: to the east
+  // sidewalk AND far up the road (z=170), so it reads as a small figure
+  // in the distance instead of a giant looming at the lens. Merely
+  // pushing it sideways (x=12) left it level with the camera, huge at
+  // the frame's edge.
+  for (const ped of S.peds) {
+    const pp = ped.mesh.position;
+    if (Math.abs(pp.x) < 8 && pp.z > 20 && pp.z < 180) {
+      pp.x = 20;
+      pp.z = 170;
+    }
+  }
   S.heat = 65; // 4 stars
   S.objectiveText = 'Bring the car to the Hideout garage';
-  // Three cruisers pace the car in formation — two flanking ahead, one
-  // level on the left — all ahead of the chase camera, so none of them
-  // stacks on top of the player's car in the frame.
+  // Two cruisers pace the car in formation, one flanking ahead on each
+  // side, so the frame reads as a chase without any cruiser stacking on
+  // the player's car. A third cruiser used to ride level with the player
+  // on the left, but it lagged behind its slot, drifted in behind the
+  // getaway car, and its light bar landed right on the player's roof in
+  // the cover — the getaway car read as a police cruiser. Two ahead is
+  // the clean shot.
   S.debug.pacing = true;
   const escort = [
     [-7.5, 110, 34, { side: -7.5, fwd: 10 }],
     [7.5, 110, 34, { side: 7.5, fwd: 10 }],
-    [-7.5, 98, 34, { side: -7.5, fwd: 0 }],
   ];
   for (const [cx, cz, speed, slot] of escort) {
     const cruiser = spawnCruiser(cx, cz);
@@ -270,6 +287,11 @@ export function stageChase() {
     cruiser.pace = slot;
   }
   S.camYaw = 0;
+  // Snap the lens to its staged spot at once. The headless game clock
+  // runs far behind real time, so the camera's per-frame ease never
+  // settles before the shutter — without this the cover is shot from
+  // wherever the lens happened to drift to, not from behind the car.
+  updateCamera(1);
 }
 
 export function stageCity() {
@@ -304,6 +326,32 @@ export function stageCity() {
     if (Math.abs(t.mesh.position.x) >= 12 || Math.abs(t.mesh.position.z) >= 12) continue;
     t.mesh.position.set(120, 0, -120);
   }
+  // The headless game clock runs far behind real time (about 0.1 s of
+  // game time per 8 s of real time), so the traffic-light cycle is still
+  // on its opening phase at the shutter — north-south green, not red.
+  // Pin the clock into the red phase (the 16 s cycle runs red from
+  // t=8 to t=16) so the stopped car below is genuinely waiting at a red
+  // light instead of sitting under a green one.
+  S.time = 10;
+  // A car stopped at the red light, so the frame shows the traffic
+  // system working instead of an empty street: take one of the cars
+  // that was just cleared out of the frame and park it at the
+  // northbound stop line of this intersection, facing north, speed
+  // zero. Its tail lamps glow (they are emissive), so it reads as a
+  // car waiting at the light with its brake lights on. The north-south
+  // light is red at the 8 s shutter (the 16 s cycle runs red from
+  // t=8 to t=16, and the clock starts near zero at boot).
+  for (const t of S.trafficCars) {
+    if (Math.abs(t.mesh.position.x) < 30 && Math.abs(t.mesh.position.z) < 30) continue;
+    t.mesh.position.set(-2.4, 0, -10.4);
+    t.mesh.rotation.y = 0;
+    t.heading = 0;
+    t.speed = 0;
+    t.cruise = 0;
+    t.alongX = false;
+    t.road = 0;
+    break;
+  }
   // Foreground interest, so the lower frame is a street, not bare pavement:
   // a car parked at the left kerb, just ahead of the camera.
   spawnParkedCar(-4, 1.5, 0, 0x3a7ad8);
@@ -314,6 +362,9 @@ export function stageCity() {
   placeWalkers([[3, -5, 0.4, 'cross'], [-3.5, -4.5, -0.5, 'cross'], [-1, -16, 2.8, 'walk'], [6, -2, -2.0, 'walk']]);
   // One shot, flash held open for the camera.
   fireAndHold();
+  // Snap the lens to its staged spot at once (see stageChase): the
+  // headless clock lags, so the per-frame ease never settles in time.
+  updateCamera(1);
 }
 
 // Move the first few pedestrians to fixed spots (x, z, heading, mode) so a
@@ -368,40 +419,75 @@ export function stageMission() {
   // east. The tower's south face is 20 m north of that road, and no nearer
   // tower stands in the same column (looking north from road x=80, the
   // (100,-60) tower sits directly in front of it and hides it).
-  player.pos.x = -40;
+  // Stand at x=-20, not -40: twenty metres closer to the tower, so the
+  // west-face sign reads bigger in the frame instead of a distant speck.
+  // The 22 m tower row north of this road still clears the sightline —
+  // the line of sight to the sign at y=68 passes well above it.
+  player.pos.x = -20;
   player.pos.z = -80;
-  player.group.position.set(-40, 0, -80);
+  player.group.position.set(-20, 0, -80);
   player.heading = Math.PI / 2; // facing east, down road z=-80 toward the tower
   S.camYaw = -Math.PI / 2;
   // Framing fix: the camera used to sit almost on the ground looking up
   // (pitch clamped to -0.15), so the near pavement filled the bottom half
   // of the frame. Raised to 0.22 at 10 m, the camera looks nearly level:
   // the tower fills the upper frame and the near pavement drops out.
-  S.camPitch = 0.22;
+  // That level look could not see the tower sign at all — the lens
+  // always points at the player's chest (y=1.55), so a sign 80 m up
+  // sits above the frame. Tilt the lens up (pitch -0.12) so the tower
+  // and its sign come into the upper frame; the street still fills the
+  // lower half.
+  S.camPitch = -0.12;
   S.camDist = 10;
   // Street life: a talking pair further down the road for depth, a waiter
   // at the kerb in the lower-left foreground, one more walker on the
   // north sidewalk close to the camera, and one waiting at the south
   // kerb in the lower-right foreground, so the lower frame has people
-  // in it instead of bare pavement.
-  placeWalkers([[-20, -82, 1.2, 'talk', 1], [-18.5, -82, -1.2, 'talk', 0], [-41.4, -83.5, 0.6, 'wait'], [-46, -73.5, -1.6, 'wait'], [-44, -71, 0.5, 'wait']]);
+  // in it instead of bare pavement. Last of all, a crosser standing on
+  // the crosswalk at the intersection (0,-80): the headless clock runs
+  // so slowly that a walker placed further back never reaches the
+  // stripes by the shutter, so it is staged on the crossing itself,
+  // mid-stride across the east-west road.
+  placeWalkers([[0, -82, 1.2, 'talk', 1], [1.5, -82, -1.2, 'talk', 0], [-21.4, -83.5, 0.6, 'wait'], [-26, -73.5, -1.6, 'wait'], [-24, -71, 0.5, 'wait'], [0, -80, 0, 'cross']]);
+  // The crosser needs its crossing spelled out: across the east-west road
+  // z=-80, from the north sidewalk to the south one. placeWalkers only
+  // sets the mode; without these the defaults would send it across the
+  // wrong road.
+  const crosser = S.peds[5];
+  if (crosser) {
+    crosser.crossFrom = 1;
+    crosser.crossAxis = 'ew';
+    crosser.crossRoad = -80;
+  }
   debugCompleteMission1();
   // debugCompleteMission1 teleports the player to the park; put them back
   // on the road with the tower in view.
-  player.pos.x = -40;
+  player.pos.x = -20;
   player.pos.z = -80;
-  player.group.position.set(-40, 0, -80);
+  player.group.position.set(-20, 0, -80);
   player.heading = Math.PI / 2;
   // A car parked in the lower-right foreground, close enough to the
-  // camera (about 8 m now) that it reads as a car in the street and
+  // camera (about 7 m now) that it reads as a car in the street and
   // fills the lower frame instead of leaving it bare: its roof stays
   // below the frame centre and its plate is fully in frame, not cut
-  // off at the right edge.
-  spawnParkedCar(-43, -75, Math.PI / 2, 0xd84a4a);
-  // The completion banner stands alone; the objective line reports the
-  // payout instead of the stale "pick up" instruction at 0 m.
-  S.objectiveText = 'Mission 1 complete — $300 earned';
+  // off at the right edge. It sits far enough down the road (east)
+  // that the low, upward-tilted lens looks over its roof at the tower
+  // instead of into its side.
+  spawnParkedCar(-21, -75.5, Math.PI / 2, 0xd84a4a);
+  // A second car in the lower-left foreground, just ahead of the lens
+  // on the road itself, so the bottom of the frame has cars on both
+  // sides instead of one car and a wide empty stretch of tarmac. It
+  // sits low enough (roof ~1.5 m) that it never hides the tower.
+  spawnParkedCar(-21, -84.5, Math.PI / 2, 0x3a7ad8);
+  // The completion banner stands alone. The objective line is left
+  // blank on purpose: its pill sits across the very top of the frame,
+  // exactly where the tower sign now lands, and would hide the sign's
+  // letters. The banner below it still says Mission complete +$300.
+  S.objectiveText = '';
   S.objectiveDist = null;
+  // Snap the lens to its staged spot at once (see stageChase): the
+  // headless clock lags, so the per-frame ease never settles in time.
+  updateCamera(1);
 }
 
 export function stageFoot() {
@@ -438,6 +524,41 @@ export function stageFoot() {
   // lower frame. Both sit close to the camera's line of sight.
   spawnParkedCar(-72, -38, Math.PI / 2, 0xe8c832, 'taxi');
   spawnParkedCar(-57.4, -36, Math.PI / 2, 0x4ad87a);
+  // The bottom of the frame used to be a dark empty band of pavement:
+  // the camera sits low looking up at the sign, so the near ground
+  // fills the lower quarter with nothing on it. Fill it with street
+  // furniture right in front of the lens — a bench on the right and a
+  // planter on the left, both about three metres ahead of the camera,
+  // low enough to stay out of the sign and the cafe but tall enough to
+  // break the empty expanse into shapes. The camera itself stays put
+  // (the sign is only just inside the top of the frame as it is).
+  const benchSeat = new THREE.Mesh(
+    new THREE.BoxGeometry(2.2, 0.5, 0.7),
+    new THREE.MeshLambertMaterial({ color: 0x8a6a42 })
+  );
+  benchSeat.position.set(-55, 0.25, -31);
+  benchSeat.castShadow = true;
+  S.scene.add(benchSeat);
+  const planterPot = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.65, 0.8, 8),
+    new THREE.MeshLambertMaterial({ color: 0x5a6a4a })
+  );
+  planterPot.position.set(-62, 0.4, -31);
+  planterPot.castShadow = true;
+  S.scene.add(planterPot);
+  const planterBush = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 8, 6),
+    new THREE.MeshLambertMaterial({ color: 0x3f8a3a })
+  );
+  planterBush.position.set(-62, 1.0, -31);
+  planterBush.castShadow = true;
+  S.scene.add(planterBush);
+  // Snap the lens to its staged spot at once (see stageChase): the
+  // headless clock lags, so the per-frame ease never settles in time.
+  // Without this the shot is taken from wherever the lens drifted to —
+  // in the last run it was pressed against a building wall and the
+  // cafe sign was out of frame entirely.
+  updateCamera(1);
 }
 
 export function fireAndHold() {

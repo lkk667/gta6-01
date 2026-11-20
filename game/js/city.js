@@ -737,14 +737,17 @@ function buildLandmarkTower() {
   // A second copy on the west face: the mission staging looks east down
   // road z=-80, so it sees the tower's west face, not the south face.
   // Without this the landmark reads as just another tall dark tower.
-  // It sits lower (y=75) than the south sign so it clears the HUD bars
-  // at the top of the frame from the street.
+  // It is big (28 m wide) and high (y=90) so the letters read at street
+  // distance and the sign clears the nearer rooftops that used to hide
+  // it — the earlier 24 m sign at y=68 sat behind a tall block and
+  // never made it into the mission frame. It sits below the mission
+  // banner at the top of the frame instead of hiding behind it.
   const signWest = new THREE.Mesh(
-    new THREE.PlaneGeometry(18, 9),
+    new THREE.PlaneGeometry(28, 14),
     new THREE.MeshBasicMaterial({ map: signTex2, side: THREE.FrontSide })
   );
   signWest.rotation.y = -Math.PI / 2;
-  signWest.position.set(cx - 13.2, 75, cz);
+  signWest.position.set(cx - 13.2, 80, cz);
   S.scene.add(signWest);
 }
 
