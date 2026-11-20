@@ -573,19 +573,23 @@ function buildStreetlights() {
 }
 
 function buildClouds() {
-  const mat = new THREE.MeshLambertMaterial({ color: 0xffc8a8, transparent: true, opacity: 0.7 });
+  // Thin dusk haze, not solid objects: unlit pale peach, very faint,
+  // squashed flat and hung high, so a low camera looking up sees wispy
+  // streaks instead of a brown lump. (The old Lambert puffs shaded brown
+  // under the orange sun and read as a UFO in the mission shot.)
+  const haze = new THREE.MeshBasicMaterial({ color: 0xf6ddd6, transparent: true, opacity: 0.3 });
   S.clouds = [];
   for (let i = 0; i < 9; i++) {
-    const g = new THREE.Group();
-    for (let j = 0; j < 4; j++) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(4 + rng() * 5, 8, 6), mat);
-      s.position.set(j * 5 - 7 + rng() * 2, rng() * 1.5, rng() * 3);
-      s.scale.y = 0.45;
-      g.add(s);
+    const puff = new THREE.Group();
+    for (let j = 0; j < 3; j++) {
+      const blob = new THREE.Mesh(new THREE.SphereGeometry(7 + rng() * 6, 8, 6), haze);
+      blob.position.set(j * 7 - 7 + rng() * 2, rng() * 1, rng() * 2);
+      blob.scale.y = 0.18;
+      puff.add(blob);
     }
-    g.position.set(-180 + rng() * 360, 55 + rng() * 25, -180 + rng() * 360);
-    S.scene.add(g);
-    S.clouds.push(g);
+    puff.position.set(-180 + rng() * 360, 110 + rng() * 30, -180 + rng() * 360);
+    S.scene.add(puff);
+    S.clouds.push(puff);
   }
 }
 

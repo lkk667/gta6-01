@@ -430,25 +430,28 @@ export function updateDriving(dt) {
 
 function updateChaseCamera(dt, car) {
   const camera = S.camera;
-  // Low and close to the ground: the road rushes past and the chase feels
-  // fast, and the low sun + long shadows read in the frame.
-  const behind = 8;
-  const height = 2.6;
-  const goalX = car.mesh.position.x - Math.sin(car.heading) * behind;
-  const goalZ = car.mesh.position.z - Math.cos(car.heading) * behind;
-  const goalY = height;
-  // Strong follow (dt*25): effectively instant in slow headless frames, so
-  // the camera never lags a whole street behind a 122 km/h car, and still
-  // smooth at 60 fps on a real machine.
-  const ease = Math.min(1, dt * 25);
-  camera.position.x += (goalX - camera.position.x) * ease;
-  camera.position.y += (goalY - camera.position.y) * ease;
-  camera.position.z += (goalZ - camera.position.z) * ease;
-  camera.lookAt(car.mesh.position.x, 1.4, car.mesh.position.z);
-  // Speed feel: the field of view widens a little as the car accelerates,
-  // from 55 at rest to 67 at top speed. Eased, so it never jumps.
-  const ratio = Math.min(1, Math.abs(car.speed) / WORLD.playerTopSpeed);
-  const targetFov = 55 + ratio * 12;
-  camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 6);
+  // Low chase view, eight metres behind the car and just above roof
+  // height: the road rushes past and the dusk light reads in the frame.
+  // The camera aims a little above the car's centre (y 2.4, not 1.4) so
+  // tall things ahead — the SOLMAR HARBOR sign at the end of the road —
+  // sit inside the frame instead of being cut off at the top edge.
+  const back = 8;
+  const rideH = 2.6;
+  const wantX = car.mesh.position.x - Math.sin(car.heading) * back;
+  const wantZ = car.mesh.position.z - Math.cos(car.heading) * back;
+  const wantY = rideH;
+  // Hard follow (dt*25): effectively instant in slow headless frames, so
+  // the camera never lags a whole street behind a 122 km/h car, and it
+  // stays smooth at 60 fps on a real machine.
+  const pull = Math.min(1, dt * 25);
+  camera.position.x += (wantX - camera.position.x) * pull;
+  camera.position.y += (wantY - camera.position.y) * pull;
+  camera.position.z += (wantZ - camera.position.z) * pull;
+  camera.lookAt(car.mesh.position.x, 2.4, car.mesh.position.z);
+  // Speed feel: the field of view opens a little as the car accelerates,
+  // 55 at rest to 67 at top speed. Eased, so it never jumps.
+  const pace = Math.min(1, Math.abs(car.speed) / WORLD.playerTopSpeed);
+  const wantFov = 55 + pace * 12;
+  camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6);
   camera.updateProjectionMatrix();
 }
