@@ -77,9 +77,9 @@ export function asphaltMaps() {
   pen.fillStyle = base;
   pen.fillRect(0, 0, SIZE, SIZE);
   const roughBase = rough.createLinearGradient(0, 0, 0, SIZE);
-  roughBase.addColorStop(0, '#8a8a8a');
-  roughBase.addColorStop(0.5, '#a8a8a8');
-  roughBase.addColorStop(1, '#8a8a8a');
+  roughBase.addColorStop(0, '#e2e2e2');
+  roughBase.addColorStop(0.5, '#f0f0f0');
+  roughBase.addColorStop(1, '#e2e2e2');
   rough.fillStyle = roughBase;
   rough.fillRect(0, 0, SIZE, SIZE);
   // Wear: soft light and dark blotches scattered across the surface,
@@ -107,6 +107,17 @@ export function asphaltMaps() {
     roughBand.addColorStop(1, 'rgba(0,0,0,0)');
     rough.fillStyle = roughBand;
     rough.fillRect(0, bandY - 60, SIZE, 120);
+  }
+  // Rain-wet puddles: irregular soft radial blotches, dark in the
+  // roughness map (wet asphalt ~0.06–0.14) and a touch darker in the
+  // colour map, so the sunset sky pools in them. Dry asphalt stays
+  // rough — the base is near-white in the roughness map.
+  for (let i = 0; i < 26; i += 1) {
+    const px = dice() * SIZE;
+    const py = dice() * SIZE;
+    const pr = 40 + dice() * 130;
+    softSpot(rough, px, py, pr, '#101010', 0.9);
+    softSpot(pen, px, py, pr, '#14161c', 0.35);
   }
   // Repair patches: dark rectangles with soft feathered edges, not
   // hard-edged boxes, plus a few hairline cracks.
@@ -208,13 +219,16 @@ export function sidewalkMap() {
 // layout. Windows are the dusk sky in miniature: a vertical gradient
 // from warm orange at the bottom to deep blue at the top, so they
 // reflect the sunset. Lit windows glow warm, and that glow is baked
-// into the emissive map too, so they shine at dusk.
+// into the emissive map too, so they shine at dusk. Coastal low
+// buildings wear Art Deco pastels (cream, coral pink, pale mint);
+// the glass style is a curtain wall — high metalness, low roughness.
 const STYLES = [
-  { wall: '#8a6a4a', trim: '#6a4a30', cols: 4, rows: 5 },
-  { wall: '#a08a6a', trim: '#7a6248', cols: 5, rows: 6 },
-  { wall: '#7a5a6a', trim: '#5a3a4a', cols: 4, rows: 6 },
-  { wall: '#6a7a8a', trim: '#4a5a6a', cols: 5, rows: 5 },
-  { wall: '#9a4a3a', trim: '#7a3226', cols: 4, rows: 5 },
+  { wall: '#d8c8a8', trim: '#b8a888', cols: 4, rows: 5 },
+  { wall: '#d89080', trim: '#b86858', cols: 5, rows: 6 },
+  { wall: '#a0c8a8', trim: '#78a888', cols: 4, rows: 6 },
+  { wall: '#a08a6a', trim: '#7a6248', cols: 5, rows: 5 },
+  { wall: '#7a5a6a', trim: '#5a3a4a', cols: 4, rows: 5 },
+  { wall: '#3a5a7a', trim: '#2a4a6a', cols: 6, rows: 8, glass: true },
 ];
 
 export function facadeMaps(styleIdx) {
@@ -246,11 +260,45 @@ export function facadeMaps(styleIdx) {
       // The sky reflected in the glass: orange at the bottom, deep
       // blue at the top.
       const sky = pen.createLinearGradient(0, y + winH, 0, y);
-      sky.addColorStop(0, '#ff9a3a');
-      sky.addColorStop(0.5, '#c86a8a');
+      sky.addColorStop(0, '#e87a2a');
+      sky.addColorStop(0.5, '#b85a78');
       sky.addColorStop(1, '#2a3a6a');
       pen.fillStyle = sky;
       pen.fillRect(x, y, winW, winH);
+      // Interior depth, so the window reads as a room, not a sticker:
+      // a warm ceiling light at the top, a furniture shadow at the
+      // bottom, fine blind slats, and a diagonal streak of sky
+      // reflected in the glass.
+      const ceiling = pen.createLinearGradient(0, y, 0, y + winH * 0.32);
+      ceiling.addColorStop(0, 'rgba(255,220,150,0.55)');
+      ceiling.addColorStop(1, 'rgba(255,220,150,0)');
+      pen.fillStyle = ceiling;
+      pen.fillRect(x, y, winW, winH * 0.32);
+      const furniture = pen.createLinearGradient(0, y + winH * 0.7, 0, y + winH);
+      furniture.addColorStop(0, 'rgba(0,0,0,0)');
+      furniture.addColorStop(1, 'rgba(10,8,12,0.55)');
+      pen.fillStyle = furniture;
+      pen.fillRect(x, y + winH * 0.7, winW, winH * 0.3);
+      pen.strokeStyle = 'rgba(20,16,20,0.35)';
+      pen.lineWidth = 2;
+      for (let s = 1; s <= 4; s++) {
+        const sy = y + (winH * s) / 5;
+        pen.beginPath();
+        pen.moveTo(x, sy);
+        pen.lineTo(x + winW, sy);
+        pen.stroke();
+      }
+      pen.save();
+      pen.beginPath();
+      pen.rect(x, y, winW, winH);
+      pen.clip();
+      pen.strokeStyle = 'rgba(255,255,255,0.28)';
+      pen.lineWidth = winW * 0.14;
+      pen.beginPath();
+      pen.moveTo(x + winW * 0.2, y + winH);
+      pen.lineTo(x + winW * 0.8, y);
+      pen.stroke();
+      pen.restore();
       // A frame around each window.
       pen.strokeStyle = style.trim;
       pen.lineWidth = 6;
@@ -259,13 +307,13 @@ export function facadeMaps(styleIdx) {
       // the colour map and the emissive map.
       if (dice() < 0.42) {
         const glow = pen.createRadialGradient(x + winW / 2, y + winH / 2, 4, x + winW / 2, y + winH / 2, winW * 0.7);
-        glow.addColorStop(0, 'rgba(255,214,130,0.95)');
-        glow.addColorStop(1, 'rgba(255,180,80,0.25)');
+        glow.addColorStop(0, 'rgba(255,214,130,0.75)');
+        glow.addColorStop(1, 'rgba(255,180,80,0.2)');
         pen.fillStyle = glow;
         pen.fillRect(x, y, winW, winH);
         const emitGlow = emit.createRadialGradient(x + winW / 2, y + winH / 2, 4, x + winW / 2, y + winH / 2, winW * 0.7);
-        emitGlow.addColorStop(0, 'rgba(255,200,110,0.9)');
-        emitGlow.addColorStop(1, 'rgba(255,170,70,0.2)');
+        emitGlow.addColorStop(0, 'rgba(255,200,110,0.7)');
+        emitGlow.addColorStop(1, 'rgba(255,170,70,0.15)');
         emit.fillStyle = emitGlow;
         emit.fillRect(x, y, winW, winH);
       }
@@ -293,7 +341,12 @@ export function facadeMaps(styleIdx) {
   }
   const map = wrapTex(canvas);
   const emissiveMap = wrapTex(emitCanvas);
-  return { map, emissiveMap };
+  // Glass curtain walls reflect the sky; painted walls stay matte.
+  return {
+    map, emissiveMap,
+    roughness: style.glass ? 0.12 : 0.85,
+    metalness: style.glass ? 0.78 : 0.05,
+  };
 }
 
 // One shared radial glow texture (lamps, headlights, light bars): a

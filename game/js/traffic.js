@@ -14,12 +14,8 @@
 import * as THREE from "../vendor/three.module.min.js"; // 3D engine
 import { S, WORLD, dist2, clamp } from "./state.js"; // shared world
 import { makeCar } from "./vehicles.js"; // car factory
+import { assemblePedestrian } from "./character.js"; // realistic people
 import { attachBlob, resolveCollisions, trafficLightState } from "./city.js"; // city helpers
-
-// Shirt, skin and trouser colours handed out at random.
-const SHIRT_DYES = [0xe84a4a, 0x4a8ae8, 0x4ad87a, 0xe8d84a, 0xd87ab8, 0x7ad8d8, 0xf2f2f2, 0x8a5a3a, 0xe87a2a, 0x9a6ad8, 0x3a8a6a, 0xd8d8d8];
-const SKIN_DYES = [0xe8b88a, 0xc88a5a, 0x8a5a34, 0xf2c8a0];
-const TROUSER_DYES = [0x2c2f36, 0x3a4a6a, 0x6a3a3a, 0x4a5a3a, 0x8a7a5a];
 
 // Metres per second for each way of moving. A jogger is plainly
 // quicker than someone out for a stroll.
@@ -75,94 +71,9 @@ function spawnBadge(height, size) {
 }
 // ------------------------------------------- pedestrians
 
-// Build one pedestrian: a tapered figure with a neck, a head small
-// next to the shoulders, two slim capsule legs with a gap, capsule
-// arms at the sides, and rounded shoes that swing with the walk. A few
-// carry a bag on their back; every figure gets a phone in the right
-// hand (hidden unless they are using it) and a "!" badge above the
-// head (hidden unless they witness a crime).
-function assemblePedestrian() {
-  const figure = new THREE.Group();
-  const chooseFrom = (list) => list[Math.floor(Math.random() * list.length)];
-  const shirtMat = new THREE.MeshLambertMaterial({ color: chooseFrom(SHIRT_DYES) });
-  const skinMat = new THREE.MeshLambertMaterial({ color: chooseFrom(SKIN_DYES) });
-  const trouserMat = new THREE.MeshLambertMaterial({ color: chooseFrom(TROUSER_DYES) });
-  const shoeMat = new THREE.MeshLambertMaterial({ color: 0x3a3d42 });
-  // Tapered torso: a smooth cylinder, chest wider than the waist, squashed
-  // into an ellipse, with a flattened sphere rounding the shoulders off.
-  const torsoMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.16, 0.55, 12), shirtMat);
-  torsoMesh.position.y = 1.12;
-  torsoMesh.scale.set(1.15, 1, 0.75);
-  torsoMesh.castShadow = true;
-  figure.add(torsoMesh);
-  const shoulderMesh = new THREE.Mesh(new THREE.SphereGeometry(0.21, 10, 8), shirtMat);
-  shoulderMesh.position.y = 1.38;
-  shoulderMesh.scale.set(1.1, 0.5, 0.7);
-  figure.add(shoulderMesh);
-  const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.12, 8), skinMat);
-  neckMesh.position.y = 1.46;
-  figure.add(neckMesh);
-  const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), skinMat);
-  headMesh.position.y = 1.6;
-  headMesh.castShadow = true;
-  figure.add(headMesh);
-  // A cap, hair, or a bare head, so the crowd is not one haircut.
-  const hairRoll = Math.random();
-  if (hairRoll < 0.35) {
-    const capMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.21, 0.08, 10), new THREE.MeshLambertMaterial({ color: chooseFrom(SHIRT_DYES) }));
-    capMesh.position.y = 1.76;
-    figure.add(capMesh);
-  } else if (hairRoll < 0.65) {
-    const hairMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x2c2018 }));
-    hairMesh.position.y = 1.62;
-    figure.add(hairMesh);
-  }
-  // Two slim capsule legs with a gap, pivoting at the hip, shifted down so their tops sit at the hip joint.
-  const legGeo = new THREE.CapsuleGeometry(0.08, 0.52, 6, 10);
-  legGeo.translate(0, -0.31, 0);
-  const leftLegMesh = new THREE.Mesh(legGeo, trouserMat);
-  leftLegMesh.position.set(-0.11, 0.68, 0);
-  figure.add(leftLegMesh);
-  const rightLegMesh = leftLegMesh.clone();
-  rightLegMesh.position.x = 0.11;
-  figure.add(rightLegMesh);
-  // Arms hang at the sides, pivoting at the shoulder, capsules again.
-  const armGeo = new THREE.CapsuleGeometry(0.062, 0.46, 6, 10);
-  armGeo.translate(0, -0.27, 0);
-  const leftArmMesh = new THREE.Mesh(armGeo, shirtMat);
-  leftArmMesh.position.set(-0.3, 1.32, 0);
-  figure.add(leftArmMesh);
-  const rightArmMesh = leftArmMesh.clone();
-  rightArmMesh.position.x = 0.3;
-  figure.add(rightArmMesh);
-  // Shoes ride on the legs so they swing: a capsule laid flat, rounded at toe and heel.
-  const shoeGeo = new THREE.CapsuleGeometry(0.07, 0.12, 4, 8);
-  shoeGeo.rotateX(Math.PI / 2);
-  const leftShoeMesh = new THREE.Mesh(shoeGeo, shoeMat);
-  leftShoeMesh.position.set(0, -0.64, 0.03);
-  leftLegMesh.add(leftShoeMesh);
-  const rightShoeMesh = new THREE.Mesh(shoeGeo, shoeMat);
-  rightShoeMesh.position.set(0, -0.64, 0.03);
-  rightLegMesh.add(rightShoeMesh);
-  // A bag on the back for about a quarter of the crowd.
-  if (Math.random() < 0.25) {
-    const bagMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.36, 0.12), new THREE.MeshLambertMaterial({ color: chooseFrom([0x6a4a2a, 0x2c2f36, 0x8a2a2a]) }));
-    bagMesh.position.set(0, 1.15, -0.2);
-    figure.add(bagMesh);
-  }
-  // A phone in the right hand, held low until the owner uses it.
-  const phoneMesh = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.15, 0.03), new THREE.MeshBasicMaterial({ color: 0x14161a }));
-  phoneMesh.position.set(0, -0.58, 0.1);
-  phoneMesh.visible = false;
-  rightArmMesh.add(phoneMesh);
-  // The witness badge, floating above the head.
-  const badgeSprite = spawnBadge(2.4, 0.9);
-  figure.add(badgeSprite);
-  // Not every pedestrian is the same height.
-  const heightScale = 0.9 + Math.random() * 0.2;
-  figure.scale.set(heightScale, heightScale, heightScale);
-  return { group: figure, leftLeg: leftLegMesh, rightLeg: rightLegMesh, leftArm: leftArmMesh, rightArm: rightArmMesh, head: headMesh, phone: phoneMesh, mark: badgeSprite };
-}
+// Pedestrians are built in character.js (assemblePedestrian):
+// lathe-turned realistic figures with two-segment joints.
+
 
 // Snap a free (x, z) onto the nearest sidewalk lane: the closest road,
 // the nearer side of it, walking either way along it.
@@ -224,7 +135,10 @@ export function buildTraffic()
   const roster = [...Array(22).fill("walk"), ...Array(6).fill("talk"), ...Array(4).fill("wait"),
     ...Array(4).fill("phone"), ...Array(2).fill("sit"), ...Array(2).fill("cross")];
   for (let i = 0; i < 40; i += 1) {
-    const figure = assemblePedestrian();
+    // A few harbour workers and two police officers among the beach crowd.
+    const roleDraw = Math.random();
+    const role = roleDraw < 0.08 ? "worker" : roleDraw < 0.13 ? "police" : undefined;
+    const figure = assemblePedestrian(role);
     const mode = roster[i];
     const x = -140 + Math.random() * 280;
     const z = -140 + Math.random() * 280;
@@ -238,9 +152,14 @@ export function buildTraffic()
       mesh: figure.group,
       legL: figure.leftLeg,
       legR: figure.rightLeg,
+      shinL: figure.shinL,
+      shinR: figure.shinR,
       armL: figure.leftArm,
       armR: figure.rightArm,
+      foreL: figure.foreL,
+      foreR: figure.foreR,
       head: figure.head,
+      chest: figure.chest,
       phone: figure.phone,
       mark: figure.mark,
       heading: Math.random() * Math.PI * 2,
@@ -642,51 +561,87 @@ function stepPedestrian(ped, dt) {
     resolveCollisions(spot, 0.4);
   }
   ped.mesh.rotation.y = ped.heading;
-  // The walk cycle, or the pose for the current state.
+  // The walk cycle, or the pose for the current state. Two-segment
+  // joints: the knee bends when its leg swings forward, the elbow
+  // stays softly bent while walking, and standing figures breathe.
   ped.walkPhase += dt * stride * 2.2;
   const sway = Math.min(1, stride / 4) * 0.5;
+  const breath = 1 + 0.02 * Math.sin(S.time * 1.6 + ped.talkPhase);
   if (ped.mode === "flee") {
     // Arms up, wobbling, while running.
     const wobble = Math.sin(S.time * 9 + ped.talkPhase) * 0.25;
     ped.armL.rotation.x = -2.3 + wobble;
     ped.armR.rotation.x = -2.3 - wobble;
+    ped.foreL.rotation.x = -0.6;
+    ped.foreR.rotation.x = -0.6;
     ped.legL.rotation.x = Math.sin(ped.walkPhase) * 0.7;
     ped.legR.rotation.x = -Math.sin(ped.walkPhase) * 0.7;
+    ped.shinL.rotation.x = Math.max(0, -Math.sin(ped.walkPhase)) * 1.0;
+    ped.shinR.rotation.x = Math.max(0, Math.sin(ped.walkPhase)) * 1.0;
   } else if (ped.mode === "talk") {
-    // Hands gesture while talking; legs still.
+    // Hands gesture while talking; legs still; slow breathing.
     const wave = Math.sin(S.time * 3 + ped.talkPhase) * 0.35;
     ped.armL.rotation.x = -0.6 + wave;
     ped.armR.rotation.x = -0.6 - wave;
+    ped.foreL.rotation.x = -0.7;
+    ped.foreR.rotation.x = -0.7;
     ped.legL.rotation.x = 0;
     ped.legR.rotation.x = 0;
+    ped.shinL.rotation.x = 0;
+    ped.shinR.rotation.x = 0;
+    ped.head.rotation.y = 0.15 * Math.sin(S.time * 0.7 + ped.talkPhase);
+    ped.chest.scale.y = breath;
   } else if (ped.mode === "sit") {
-    // Seated: hips down on the bench, thighs forward, arms relaxed.
+    // Seated: hips down on the bench, thighs forward, shins down.
     spot.y = 0.45;
     ped.legL.rotation.x = -1.5;
     ped.legR.rotation.x = -1.5;
+    ped.shinL.rotation.x = 1.5;
+    ped.shinR.rotation.x = 1.5;
     ped.armL.rotation.x = 0.1;
     ped.armR.rotation.x = 0.1;
+    ped.foreL.rotation.x = -0.3;
+    ped.foreR.rotation.x = -0.3;
   } else if (ped.mode === "phone") {
     // The phone up in the right hand, head tipped down at the screen.
     ped.phone.visible = true;
     ped.armR.rotation.x = -1.1;
+    ped.foreR.rotation.x = -0.6;
     ped.armL.rotation.x = 0;
+    ped.foreL.rotation.x = -0.2;
     ped.head.rotation.x = 0.3;
+    ped.head.rotation.y = 0;
     ped.legL.rotation.x = 0;
     ped.legR.rotation.x = 0;
+    ped.shinL.rotation.x = 0;
+    ped.shinR.rotation.x = 0;
+    ped.chest.scale.y = breath;
   } else if (ped.mode === "wait") {
     ped.phone.visible = false;
     ped.head.rotation.x = 0;
+    // Standing still: breathe, and glance around now and then.
+    ped.head.rotation.y = 0.5 * Math.sin(S.time * 0.45 + ped.talkPhase * 2);
     ped.legL.rotation.x = 0;
     ped.legR.rotation.x = 0;
+    ped.shinL.rotation.x = 0;
+    ped.shinR.rotation.x = 0;
     ped.armL.rotation.x = 0;
     ped.armR.rotation.x = 0;
+    ped.foreL.rotation.x = -0.15;
+    ped.foreR.rotation.x = -0.15;
+    ped.chest.scale.y = breath;
   } else {
     ped.phone.visible = false;
     ped.head.rotation.x = 0;
+    ped.head.rotation.y = 0;
     ped.legL.rotation.x = Math.sin(ped.walkPhase) * sway;
     ped.legR.rotation.x = -Math.sin(ped.walkPhase) * sway;
+    ped.shinL.rotation.x = Math.max(0, -Math.sin(ped.walkPhase)) * 0.9;
+    ped.shinR.rotation.x = Math.max(0, Math.sin(ped.walkPhase)) * 0.9;
     ped.armL.rotation.x = -Math.sin(ped.walkPhase) * sway * 0.9;
     ped.armR.rotation.x = Math.sin(ped.walkPhase) * sway * 0.9;
+    ped.foreL.rotation.x = -0.3 - 0.15 * Math.abs(Math.sin(ped.walkPhase));
+    ped.foreR.rotation.x = -0.3 - 0.15 * Math.abs(Math.sin(ped.walkPhase));
+    ped.chest.scale.y = 1;
   }
 }

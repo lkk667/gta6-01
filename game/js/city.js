@@ -33,38 +33,198 @@ function paintCanvas(w, h, draw, repeatX, repeatY) {
   return t;
 }
 
-// Dusk sky: a big inverted sphere painted with a vertical gradient — deep
-// violet overhead fading through magenta and orange to a warm horizon —
-// plus a low sun glow on the western side. The dome ignores fog.
+// The sunset sky as a real shader: four vertical colour bands (indigo
+// zenith, violet, coral pink, molten-gold horizon), two layers of
+// stretched FBM cloud bands, and a sun disc with a soft Mie halo. One
+// factory, used both for the dome in the scene and for the PMREM
+// environment bake in main.js, so the reflections match the sky.
+const SUN_DIR = new THREE.Vector3(-0.09, 0.08, 0.99).normalize();
+
+export function skyShaderMaterial() {
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    fog: false,
+    depthWrite: false,
+    uniforms: { sunDir: { value: SUN_DIR } },
+    vertexShader: `
+      varying vec3 vDir;
+      void main() {
+        vDir = normalize(position);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying vec3 vDir;
+      uniform vec3 sunDir;
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+                   mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      float fbm(vec2 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 3; i++) {
+          v += a * noise(p);
+          p = p * 2.13 + vec2(17.3, 9.1);
+          a *= 0.5;
+        }
+        return v;
+      }
+      void main() {
+        vec3 dir = normalize(vDir);
+        float h = dir.y;
+        // Four vertical bands, blended smoothly.
+        vec3 col = mix(vec3(0.165, 0.149, 0.173), vec3(1.0, 0.784, 0.459), smoothstep(-0.08, 0.10, h));
+        col = mix(col, vec3(0.949, 0.482, 0.447), smoothstep(0.10, 0.30, h));
+        col = mix(col, vec3(0.420, 0.247, 0.478), smoothstep(0.30, 0.58, h));
+        col = mix(col, vec3(0.078, 0.114, 0.259), smoothstep(0.58, 0.92, h));
+        // Sunset cloud bands: two FBM layers, stretched horizontally,
+        // living in the mid and low sky. Sunlit edges glow gold-pink,
+        // shadowed sides stay cool violet-blue.
+        vec2 cuv = dir.xz / (0.35 + abs(dir.y));
+        float cl1 = fbm(cuv * vec2(1.6, 5.0) + vec2(3.7, 1.2));
+        float cl2 = fbm(cuv * vec2(3.1, 8.0) - vec2(8.4, 2.6));
+        float band = smoothstep(0.02, 0.22, h) * (1.0 - smoothstep(0.45, 0.75, h));
+        float clouds = band * smoothstep(0.40, 0.55, cl1 * 0.65 + cl2 * 0.35);
+        vec3 sunSide = vec3(1.25, 0.95, 0.7);
+        vec3 shadeSide = vec3(0.12, 0.10, 0.30);
+        float sunFacing = clamp(dot(dir, sunDir) * 0.5 + 0.5, 0.0, 1.0);
+        vec3 cloudCol = mix(shadeSide, sunSide, sunFacing);
+        col = mix(col, cloudCol, clouds * 0.9);
+        // Sun disc with a soft Mie-scatter halo.
+        float d = max(dot(dir, sunDir), 0.0);
+        col += vec3(1.0, 0.85, 0.6) * pow(d, 90.0) * 1.0;
+        col += vec3(1.0, 0.62, 0.35) * pow(d, 8.0) * 0.22;
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+
+// The sky dome: the shader sphere, drawn first and never occluding.
 function buildSky() {
-  const cv = document.createElement('canvas');
-  cv.width = 1024;
-  cv.height = 512;
-  const ctx = cv.getContext('2d');
-  const sky = ctx.createLinearGradient(0, 0, 0, 512);
-  const stops = [
-    [0, '#1e1440'],
-    [0.35, '#6a2a55'],
-    [0.58, '#e85a3a'],
-    [0.74, '#ff9a55'],
-    [0.86, '#ffc27a'],
-    [1, '#ffd9a0'],
-  ];
-  for (const [pos, col] of stops) sky.addColorStop(pos, col);
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, 1024, 512);
-  const glow = ctx.createRadialGradient(260, 430, 4, 260, 430, 130);
-  glow.addColorStop(0, 'rgba(255,240,200,0.95)');
-  glow.addColorStop(0.35, 'rgba(255,190,110,0.55)');
-  glow.addColorStop(1, 'rgba(255,150,80,0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, 1024, 512);
   const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(700, 24, 14),
-    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), side: THREE.BackSide, fog: false })
+    new THREE.SphereGeometry(700, 32, 20),
+    skyShaderMaterial()
   );
   dome.renderOrder = -10;
   S.scene.add(dome);
+}
+
+// Palm crowns that sway, neon materials that breathe, beacons that
+// blink, the harbour water maps, and the police helicopter — all driven
+// by updateCityLife, called once per frame from main.js.
+const palmCrowns = [];
+const neonMats = [];
+const beaconMats = [];
+let seaBump = null;
+let seaRough = null;
+let heli = null;
+let heliAngle = 0;
+let cityTime = 0;
+
+// A soft blotch texture for the harbour water: grey blobs that read as
+// ripples in a bump map and as sparkle in a roughness map.
+function rippleTexture(rx, ry) {
+  return paintCanvas(256, 256, (g, w, h) => {
+    g.fillStyle = '#808080';
+    g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 120; i++) {
+      const x = dice() * w, y = dice() * h, r = 8 + dice() * 30;
+      const light = dice() > 0.5;
+      const grad = g.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, light ? 'rgba(200,200,200,0.5)' : 'rgba(60,60,60,0.5)');
+      grad.addColorStop(1, 'rgba(128,128,128,0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+  }, rx, ry);
+}
+
+// A wet-road neon streak: a long flat additive quad on the asphalt,
+// bright at the light and fading away, so the road reads as rain-wet.
+let wetStreakTex = null;
+function wetStreakTexture() {
+  if (wetStreakTex) return wetStreakTex;
+  wetStreakTex = paintCanvas(64, 256, (g, w, h) => {
+    const grad = g.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grad.addColorStop(0.35, 'rgba(255,255,255,0.35)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, w, h);
+  });
+  return wetStreakTex;
+}
+function addWetStreak(x, z, len, color, alongX) {
+  const streak = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.2, len),
+    new THREE.MeshBasicMaterial({
+      map: wetStreakTexture(), color, transparent: true, opacity: 0.3,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+  );
+  streak.rotation.x = -Math.PI / 2;
+  if (alongX) streak.rotation.z = Math.PI / 2;
+  streak.position.set(x, 0.03, z);
+  S.scene.add(streak);
+}
+
+// One frame of city life: palm sway, the police helicopter, neon
+// breathing, beacon blinking, and the harbour water moving. Called
+// from main.js every frame, in menu and in play.
+export function updateCityLife(dt) {
+  cityTime += dt;
+  const t = cityTime;
+  for (const palm of palmCrowns) {
+    palm.crown.rotation.z = 0.03 * Math.sin(t * 0.8 + palm.phase);
+    palm.crown.rotation.x = 0.02 * Math.sin(t * 0.6 + palm.phase * 1.3);
+  }
+  // Neon signs breathe gently instead of glaring flat.
+  for (const neon of neonMats) {
+    const glow = 0.86 + 0.14 * (0.5 + 0.5 * Math.sin(t * 1.8 + neon.phase));
+    neon.mat.color.copy(neon.base).multiplyScalar(glow);
+  }
+  // Aviation beacons blink in sync: on for a beat, off for a beat.
+  const blink = Math.sin(t * 2.0) > 0 ? 1 : 0.12;
+  for (const beacon of beaconMats) {
+    beacon.mat.color.setHex(blink > 0.5 ? 0xff2a2a : 0x551111);
+  }
+  // Harbour water: two ripple maps drifting in different directions.
+  if (seaBump) {
+    seaBump.offset.x += dt * 0.008;
+    seaBump.offset.y += dt * 0.004;
+  }
+  if (seaRough) {
+    seaRough.offset.x -= dt * 0.006;
+    seaRough.offset.y += dt * 0.01;
+  }
+  // The police helicopter: only once the wanted level reaches 3 stars.
+  // It circles low over the harbour, its searchlight cone sweeping
+  // the streets below — visible in the distance of the chase cover.
+  // The orbit stays over the road itself (x within ±15): the towers
+  // flanking the road would hide a wider orbit from the chase camera.
+  if (heli) {
+    const wanted = S.heat >= 60;
+    heli.group.visible = wanted;
+    if (wanted) {
+      heliAngle += dt * 0.22;
+      const hx = Math.cos(heliAngle) * 15;
+      const hz = 210 + Math.sin(heliAngle) * 15;
+      heli.group.position.set(hx, 35, hz);
+      heli.group.rotation.y = -heliAngle;
+      heli.rotor.rotation.y += dt * 22;
+      heli.cone.rotation.x = 0.35 * Math.sin(t * 0.7);
+      heli.cone.rotation.z = 0.3 * Math.sin(t * 0.55 + 1.4);
+    }
+  }
 }
 
 // A speckled flat colour: base + a scatter of soft tinted dots. Each
@@ -279,12 +439,15 @@ function layStreets() {
 
   // Roads: asphalt with a roughness map so the dusk sun catches the worn
   // bands. The tile repeats ten times down each road, laying the centre
-  // dash and edge lines along the whole street.
+  // dash and edge lines along the whole street. Wet asphalt reflects
+  // the pink-gold sky (envMapIntensity 1.45) through the puddle patches
+  // in the roughness map.
   const asphalt = asphaltMaps();
   asphalt.map.repeat.set(1, 10);
   asphalt.roughnessMap.repeat.set(1, 10);
   const streetMat = new THREE.MeshStandardMaterial({
     map: asphalt.map, roughnessMap: asphalt.roughnessMap, roughness: 0.92, metalness: 0.05,
+    envMapIntensity: 1.45,
   });
   for (const road of WORLD.roads) {
     const nsStrip = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, WORLD.size), streetMat);
@@ -361,7 +524,8 @@ function layStreets() {
   stopBatch.instanceMatrix.needsUpdate = true;
   S.scene.add(stopBatch);
 
-  // The beach and the sea at the south edge: warm sand, deep dusk-blue water.
+  // The beach and the sea at the south edge: warm sand, deep teal-blue
+  // water with procedural ripples that drift in two directions.
   const beach = new THREE.Mesh(
     new THREE.PlaneGeometry(WORLD.size, 34),
     new THREE.MeshLambertMaterial({ map: grainTex('#e8c890', ['#d8b878', '#f2d4a0', '#c8a868'], 700, 3) })
@@ -370,9 +534,15 @@ function layStreets() {
   beach.position.set(0, 0.02, WORLD.half - 17);
   beach.receiveShadow = true;
   S.scene.add(beach);
+  seaBump = rippleTexture(6, 3);
+  seaRough = rippleTexture(4, 2);
   const sea = new THREE.Mesh(
     new THREE.PlaneGeometry(900, 300),
-    new THREE.MeshLambertMaterial({ color: 0x2a4a7a })
+    new THREE.MeshStandardMaterial({
+      color: 0x0e3a4a, metalness: 0.85, roughness: 0.35,
+      roughnessMap: seaRough, bumpMap: seaBump, bumpScale: 0.6,
+      envMapIntensity: 1.3,
+    })
   );
   sea.rotation.x = -Math.PI / 2;
   sea.position.set(0, -0.4, WORLD.half + 150);
@@ -404,11 +574,11 @@ function shopSignTex(name) {
 
 function erectTower(bx, bz, bw, bd, bh, paint) {
   // Each block gets its own facade style so neighbours don't match:
-  // warm stone, glass curtain wall, deco, concrete or brick, each with
-  // a lit-window emissive map of its own so the windows glow at dusk.
-  // The facade texture carries windows of different sizes, a few
+  // Art Deco pastels, warm stone, dusk mauve, or a glass curtain wall,
+  // each with a lit-window emissive map of its own so the windows glow
+  // at dusk. The facade texture carries windows with interior depth,
   // balconies and air-conditioner boxes, so no two faces are identical.
-  const kind = Math.abs(Math.floor(bx * 0.7 + bz * 1.3)) % 5;
+  const kind = Math.abs(Math.floor(bx * 0.7 + bz * 1.3)) % 6;
   const skin = facadeMaps(kind);
   const wallMat = new THREE.MeshStandardMaterial({
     map: skin.map, emissive: 0xffffff, emissiveMap: skin.emissiveMap,
@@ -417,6 +587,22 @@ function erectTower(bx, bz, bw, bd, bh, paint) {
   const tower = addBox(bw, bh, bd, wallMat, bx, bh / 2, bz);
   tower.castShadow = true;
   tower.receiveShadow = true;
+  // Low coastal and main-street buildings wear their Art Deco plainly:
+  // horizontal cornices near the top and at the first floor, plus a
+  // thin glowing neon tube along the south face.
+  if (bh <= 22) {
+    const corniceMat = flat(0xf2e8d8);
+    addBox(bw + 0.4, 0.5, bd + 0.4, corniceMat, bx, bh - 1.2, bz);
+    addBox(bw + 0.4, 0.35, bd + 0.4, corniceMat, bx, 2.2, bz);
+    const tubeMat = new THREE.MeshBasicMaterial({ color: dice() < 0.5 ? 0x2ad8ff : 0xff5a9a });
+    neonMats.push({ mat: tubeMat, phase: dice() * Math.PI * 2, base: tubeMat.color.clone() });
+    addBox(bw * 0.7, 0.12, 0.12, tubeMat, bx, bh - 0.6, bz + bd / 2 + 0.1);
+  }
+  // A glass curtain wall gets a slim parapet crowning the roof.
+  if (kind === 5) {
+    addBox(bw + 0.3, 0.8, 0.3, flat(0x2c3a4a), bx, bh + 0.4, bz + bd / 2);
+    addBox(bw + 0.3, 0.8, 0.3, flat(0x2c3a4a), bx, bh + 0.4, bz - bd / 2);
+  }
   // A stone plinth at the ground floor, a little wider than the tower,
   // so the building meets the pavement instead of floating on it.
   const base = addBox(bw + 0.6, 1.1, bd + 0.6, flat(0x4a4440), bx, 0.55, bz);
@@ -447,7 +633,9 @@ function erectTower(bx, bz, bw, bd, bh, paint) {
     const aerial = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 7, 5), flat(0x2c2f36));
     aerial.position.set(bx - bw * 0.2, bh + 3.5, bz + bd * 0.2);
     S.scene.add(aerial);
-    const tipLight = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), new THREE.MeshBasicMaterial({ color: 0xff4a4a }));
+    const tipMat = new THREE.MeshBasicMaterial({ color: 0xff4a4a });
+    beaconMats.push({ mat: tipMat, phase: dice() * Math.PI * 2 });
+    const tipLight = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 5), tipMat);
     tipLight.position.set(bx - bw * 0.2, bh + 7, bz + bd * 0.2);
     S.scene.add(tipLight);
   } else if (pick < 0.85) {
@@ -616,6 +804,12 @@ function plantPalm(x, z) {
   trunk.castShadow = true;
   S.scene.add(trunk);
   const crownX = x + leanX;
+  // The crown is one group pivoting at the trunk top, so the whole
+  // frond ring can sway in the sea breeze as a single piece.
+  const crown = new THREE.Group();
+  crown.position.set(crownX, 5.6, z);
+  S.scene.add(crown);
+  palmCrowns.push({ crown, phase: dice() * Math.PI * 2 });
   // Fronds are feather leaves, not solid blades: a canvas-drawn leaf with
   // a vein gradient on a plane, alphaTest cutting the leaf shape out so
   // the sky shows between the fronds. The plane is laid flat and pivoted
@@ -630,11 +824,10 @@ function plantPalm(x, z) {
   for (let i = 0; i < 8; i++) {
     const ang = (i / 8) * Math.PI * 2 + dice() * 0.3;
     const leaf = new THREE.Mesh(leafGeo, leafMats[i % 2]);
-    leaf.position.set(crownX, 5.6, z);
     leaf.rotation.y = -ang;
     leaf.rotation.x = 0.75 + dice() * 0.3; // droop downward, short reach
     leaf.castShadow = true;
-    S.scene.add(leaf);
+    crown.add(leaf);
   }
   const nutSkin = flat(0x6a4a22);
   for (let i = 0; i < 3; i++) {
@@ -652,7 +845,7 @@ function plantPalm(x, z) {
 // the tube leaves the ground vertically and arrives at the bulb
 // horizontally. The warm bulb and its glow halo stay exactly where they
 // were, so the light still falls on the same patch of road.
-function plantLamp(x, z) {
+function plantLamp(x, z, streak) {
   const curve = new THREE.QuadraticBezierCurve3(
     new THREE.Vector3(x, 0, z),
     new THREE.Vector3(x, 5.9, z),
@@ -677,6 +870,13 @@ function plantLamp(x, z) {
   halo.scale.set(3.2, 3.2, 1);
   halo.position.set(x + 1.6, 5.85, z);
   S.scene.add(halo);
+  // A wet-road streak under the light: bright at the lamp's road point,
+  // fading away along the road, so the asphalt reads as rain-wet.
+  if (streak) {
+    const len = 8;
+    if (streak.alongX) addWetStreak(streak.x + len / 2, streak.z, len, 0xffd27a, true);
+    else addWetStreak(streak.x, streak.z + len / 2, len, 0xffd27a, false);
+  }
 }
 
 // One shared radial glow texture (lamps, headlights, light bars): a soft
@@ -700,12 +900,15 @@ function sharedGlowTex() {
 }
 
 function layLamps() {
+  let n = 0;
   for (const r of WORLD.roads) {
     for (let v = -160; v <= 160; v += 80) {
-      plantLamp(r + 5.6, v);
+      // Every third lamp leaves a wet reflection streak on the road.
+      plantLamp(r + 5.6, v, n % 3 === 0 ? { x: r, z: v, alongX: false } : null);
       // Offset along the road too: a lamp at (v, r-5.6) with v on a road
       // would stand in the middle of the crossing north-south road.
-      plantLamp(v + 5.6, r - 5.6);
+      plantLamp(v + 5.6, r - 5.6, n % 3 === 1 ? { x: v + 5.6, z: r, alongX: true } : null);
+      n++;
     }
   }
 }
@@ -751,7 +954,11 @@ function buildCafe() {
   awn.rotation.x = -0.35;
   S.scene.add(awn);
   // Pink neon trim along the awning front edge.
-  addBox(22, 0.22, 0.22, new THREE.MeshBasicMaterial({ color: 0xff5a9a }), cx, 4.4, cz + 10.6);
+  const trimMat = new THREE.MeshBasicMaterial({ color: 0xff5a9a });
+  neonMats.push({ mat: trimMat, phase: dice() * Math.PI * 2, base: trimMat.color.clone() });
+  addBox(22, 0.22, 0.22, trimMat, cx, 4.4, cz + 10.6);
+  // The sign's pink glow streaks across the wet road in front.
+  addWetStreak(cx, -36, 8, 0xff5a9a, false);
   // Glowing doorway.
   const door = new THREE.Mesh(
     new THREE.PlaneGeometry(3.4, 5),
@@ -765,9 +972,11 @@ function buildCafe() {
     { text: 'CAFE LUNA', size: 92, color: '#ff7ab0', y: 96 },
     { text: 'ESPRESSO · LOUNGE', size: 40, color: '#ffd94a', y: 196 },
   ], '#ff7ab0', '#ff4d8d');
+  const cafeSignMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide });
+  neonMats.push({ mat: cafeSignMat, phase: dice() * Math.PI * 2, base: cafeSignMat.color.clone() });
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(15, 7.5),
-    new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide })
+    cafeSignMat
   );
   sign.position.set(cx, 13.2, cz + 9.2);
   S.scene.add(sign);
@@ -794,9 +1003,11 @@ function buildGarage() {
     { text: 'THE HIDEOUT', size: 84, color: '#ffb84a', y: 96 },
     { text: 'CUSTOMS & GARAGE', size: 38, color: '#f2f2f2', y: 196 },
   ], '#ffb84a', '#ff9a00');
+  const garageSignMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide });
+  neonMats.push({ mat: garageSignMat, phase: dice() * Math.PI * 2, base: garageSignMat.color.clone() });
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(13, 6.5),
-    new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide })
+    garageSignMat
   );
   sign.rotation.y = Math.PI / 2;
   sign.position.set(cx + 11.2, 11.5, cz);
@@ -812,7 +1023,7 @@ function buildTowerLandmark() {
   // A glass curtain wall for the landmark: clone the facade maps so the
   // 130 m face can repeat the window grid three times up its height
   // without changing the repeat on every other glass tower.
-  const skin = facadeMaps(1);
+  const skin = facadeMaps(5);
   const skinMap = skin.map.clone();
   skinMap.repeat.set(1, 3);
   skinMap.needsUpdate = true;
@@ -834,15 +1045,21 @@ function buildTowerLandmark() {
   const spike = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.8, 16, 6), flat(0x2c2f36));
   spike.position.set(tx, 138, tz);
   S.scene.add(spike);
-  const beaconLight = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
+  const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  beaconMats.push({ mat: beaconMat, phase: 0 });
+  const beaconLight = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), beaconMat);
   beaconLight.position.set(tx, 146.5, tz);
   S.scene.add(beaconLight);
+  // The tower's cyan glow streaks across the wet road below it.
+  addWetStreak(104, -80, 8, 0x2ad8ff, true);
   const signTex = neonSign([
     { text: 'SOLMAR TOWER', size: 56, color: '#9ad8ff', y: 128 },
   ], '#9ad8ff', '#4da8ff');
+  const towerSignMat = new THREE.MeshBasicMaterial({ map: signTex, side: THREE.FrontSide });
+  neonMats.push({ mat: towerSignMat, phase: dice() * Math.PI * 2, base: towerSignMat.color.clone() });
   const signSouth = new THREE.Mesh(
     new THREE.PlaneGeometry(18, 9),
-    new THREE.MeshBasicMaterial({ map: signTex, side: THREE.FrontSide })
+    towerSignMat
   );
   signSouth.position.set(tx, 100, tz + 13.2);
   S.scene.add(signSouth);
@@ -856,7 +1073,7 @@ function buildTowerLandmark() {
   // banner at the top of the frame instead of hiding behind it.
   const signWestFace = new THREE.Mesh(
     new THREE.PlaneGeometry(28, 14),
-    new THREE.MeshBasicMaterial({ map: signTex, side: THREE.FrontSide })
+    towerSignMat
   );
   signWestFace.rotation.y = -Math.PI / 2;
   signWestFace.position.set(tx - 13.2, 80, tz);
@@ -874,9 +1091,11 @@ function buildClinic() {
   const tex = neonSign([
     { text: 'SOLMAR GENERAL', size: 64, color: '#7ad8ff', y: 128 },
   ], '#7ad8ff', '#4da8ff');
+  const clinicSignMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide });
+  neonMats.push({ mat: clinicSignMat, phase: dice() * Math.PI * 2, base: clinicSignMat.color.clone() });
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(16, 8),
-    new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide })
+    clinicSignMat
   );
   sign.position.set(cx, 12, cz + 9.2);
   S.scene.add(sign);
@@ -893,15 +1112,19 @@ function buildMarina() {
   const signTex = neonSign([
     { text: 'SOLMAR HARBOR', size: 52, color: '#7ad8ff', y: 128 },
   ], '#7ad8ff', '#4da8ff');
+  const harborSignMat = new THREE.MeshBasicMaterial({ map: signTex, side: THREE.FrontSide });
+  neonMats.push({ mat: harborSignMat, phase: dice() * Math.PI * 2, base: harborSignMat.color.clone() });
   // Narrow (12 m) so it fits the gap between the towers flanking road x=0
   // instead of being clipped by them — the v3 cover read "OLMAR HARBO".
   const harborSign = new THREE.Mesh(
     new THREE.PlaneGeometry(12, 6),
-    new THREE.MeshBasicMaterial({ map: signTex, side: THREE.FrontSide })
+    harborSignMat
   );
   harborSign.position.set(px, 11, pz - 4);
   harborSign.rotation.y = Math.PI;
   S.scene.add(harborSign);
+  // The sign's cyan glow streaks across the wet road leading to the pier.
+  addWetStreak(px, 168, 8, 0x7ad8ff, false);
   // Boats moored past the pier: simple hulls bobbing on the water.
   for (let k = 0; k < 3; k++) {
     const boat = new THREE.Mesh(new THREE.ConeGeometry(2.2, 7, 6), flat(0xe8e8e8));
@@ -1114,12 +1337,75 @@ function laySidewalkProps() {
   // Shrub crowns on the planters, same spots, one more instanced mesh.
   fill(
     new THREE.SphereGeometry(0.55, 8, 6),
-    flat(0x3f8a3a), planters, 1.05, true
+    flat(0x5da34e), planters, 1.05, true
   );
   fill(
     new THREE.CylinderGeometry(0.14, 0.16, 0.9, 8),
     flat(0x3a3d42), bollards, 0.45, false
   );
+}
+
+// The police helicopter: a low-poly airframe with a spinning main
+// rotor and a searchlight cone underneath. Built once, hidden until
+// the wanted level reaches 3 stars; updateCityLife flies it.
+function buildHelicopter() {
+  const group = new THREE.Group();
+  // Dark navy airframe with a white stripe: a white body would vanish
+  // against the pale sunset sky, so the helicopter reads as a dark
+  // silhouette with a pale band and a spinning rotor.
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x22304a, roughness: 0.4, metalness: 0.4 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1c2a4a, roughness: 0.4, metalness: 0.4 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3.4, 1.3, 1.6), bodyMat);
+  body.castShadow = true;
+  group.add(body);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(3.42, 0.3, 1.62), new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.4, metalness: 0.4 }));
+  stripe.position.y = -0.2;
+  group.add(stripe);
+  const glass = new THREE.Mesh(
+    new THREE.BoxGeometry(1.1, 0.9, 1.5),
+    new THREE.MeshPhysicalMaterial({ color: 0x0e1622, metalness: 0.9, roughness: 0.08 })
+  );
+  glass.position.set(1.6, 0.1, 0);
+  group.add(glass);
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.5, 0.5), bodyMat);
+  boom.position.set(-3.0, 0.3, 0);
+  group.add(boom);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.4, 0.9), darkMat);
+  fin.position.set(-4.5, 0.8, 0);
+  group.add(fin);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.7, 6), darkMat);
+  mast.position.y = 0.9;
+  group.add(mast);
+  const rotor = new THREE.Group();
+  rotor.position.y = 1.25;
+  const bladeGeo = new THREE.BoxGeometry(7.5, 0.06, 0.35);
+  const bladeA = new THREE.Mesh(bladeGeo, darkMat);
+  const bladeB = new THREE.Mesh(bladeGeo, darkMat);
+  bladeB.rotation.y = Math.PI / 2;
+  rotor.add(bladeA);
+  rotor.add(bladeB);
+  group.add(rotor);
+  for (const s of [-1, 1]) {
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.08, 0.12), darkMat);
+    skid.position.set(0, -0.95, s * 0.7);
+    group.add(skid);
+  }
+  // The searchlight: a translucent cone hanging below the airframe,
+  // just long enough to reach the street from the helicopter's height.
+  const coneGeo = new THREE.ConeGeometry(7, 32, 12, 1, true);
+  coneGeo.translate(0, -16, 0);
+  const cone = new THREE.Mesh(
+    coneGeo,
+    new THREE.MeshBasicMaterial({
+      color: 0xfff2c8, transparent: true, opacity: 0.14,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    })
+  );
+  cone.position.y = -0.7;
+  group.add(cone);
+  group.visible = false;
+  S.scene.add(group);
+  heli = { group, rotor, cone };
 }
 
 export function buildCity() {
@@ -1138,6 +1424,7 @@ export function buildCity() {
   laySidewalkProps();
   laySkyline();
   hangClouds();
+  buildHelicopter();
   // Extra palms along the beach and plaza.
   for (let i = 0; i < 8; i++) plantPalm(-160 + i * 44, 178);
   plantPalm(-14, 14);

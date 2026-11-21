@@ -30,6 +30,9 @@ export function buildHud() {
     healthText: document.getElementById('health-text'),
     ammoCount: document.getElementById('ammo-count'),
     speed: document.getElementById('speed'),
+    speedNum: document.getElementById('speed-num'),
+    speedFill: document.getElementById('speed-fill'),
+    speedlines: document.getElementById('speedlines'),
     toasts: document.getElementById('toasts'),
     crosshair: document.getElementById('crosshair'),
     minimap: document.getElementById('minimap'),
@@ -46,6 +49,8 @@ function paintStars() {
     spans.push('<span class="star ' + (i < n ? 'lit' : 'dim') + '">★</span>');
   }
   dom.stars.innerHTML = spans.join('');
+  // At 4 stars the lit stars breathe red/blue, like the cruisers' bars.
+  dom.stars.classList.toggle('hot', n >= 4);
 }
 
 function paintCash() {
@@ -92,14 +97,25 @@ function paintSpeed() {
     if (lastSpeed !== 'hidden') {
       lastSpeed = 'hidden';
       dom.speed.style.display = 'none';
+      if (dom.speedlines) dom.speedlines.style.opacity = '0';
     }
     return;
   }
-  const text = Math.round(S.speedKmh || 0) + ' km/h';
+  const kmh = Math.round(S.speedKmh || 0);
+  const text = kmh + ' km/h';
   if (text === lastSpeed) return;
   lastSpeed = text;
   dom.speed.style.display = 'block';
-  dom.speed.textContent = text;
+  if (dom.speedNum) dom.speedNum.textContent = String(kmh);
+  else dom.speed.textContent = text;
+  // The rev bar fills with speed and shifts cyan -> pink -> orange-red.
+  const frac = Math.min(1, kmh / 122);
+  if (dom.speedFill) {
+    dom.speedFill.style.width = Math.round(frac * 100) + '%';
+    dom.speedFill.style.background = frac < 0.4 ? '#2ad8ff' : frac < 0.75 ? '#ff5a9a' : '#ff4a2a';
+  }
+  // Past 100 km/h the edge speed lines fade in, never blocking the view.
+  if (dom.speedlines) dom.speedlines.style.opacity = kmh >= 100 ? '0.12' : '0';
 }
 
 function paintCrosshair() {

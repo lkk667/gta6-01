@@ -9,7 +9,7 @@
 
 import * as THREE from "../vendor/three.module.min.js";
 import { WORLD, S, LANDMARKS, clearToasts, toast } from "./state.js";
-import { buildCity, updateTrafficLights, updateBlobShadows } from "./city.js";
+import { buildCity, skyShaderMaterial, updateCityLife, updateTrafficLights, updateBlobShadows } from "./city.js";
 import { updateCamera, updatePlayer, buildPlayer } from "./player.js";
 import { enterCar, exitCar, nearestCar, spawnParkedCar, updateDriving } from "./vehicles.js";
 import { buildTraffic, reportCrime, updatePeds, updateTraffic } from "./traffic.js";
@@ -28,13 +28,15 @@ let fHeld = false;
 let rHeld = false;
 
 function rigSun() {
-  // Golden hour: a low warm sun out of the west, pink-orange sky
-  // light, long real shadows. Blob shadows from city.js stay as the
-  // contact anchors under cars and people.
-  const hemi = new THREE.HemisphereLight(0xffb08a, 0x5a4038, 0.75);
+  // Golden hour: a low warm sun out of the west at 16 degrees elevation,
+  // so the shadows run long. Cold violet-blue sky light against a warm
+  // dark ground bounce. Blob shadows from city.js stay as the contact
+  // anchors under cars and people. The light follows the player (see
+  // frameLoop), so the shadow frustum always covers the action.
+  const hemi = new THREE.HemisphereLight(0x748fd8, 0x4a2c26, 0.78);
   S.scene.add(hemi);
   const lowSun = new THREE.DirectionalLight(0xffb060, 2.1);
-  lowSun.position.set(-180, 62, 55);
+  lowSun.position.set(-180, 54, 55);
   lowSun.castShadow = true;
   lowSun.shadow.mapSize.set(2048, 2048);
   const shadeCam = lowSun.shadow.camera;
@@ -49,35 +51,20 @@ function rigSun() {
 }
 
 function bakeSkyEnv() {
-  // A small gradient sky baked once through PMREM, so clearcoat paint,
-  // glass and chrome pick up the orange-gold horizon and the violet
-  // zenith instead of reflecting nothing. Built once at boot — no
-  // per-frame cost. Kept dim so it lifts materials without washing
-  // out the dusk lighting.
+  // The same shader sky that hangs over the city, baked once through
+  // PMREM, so clearcoat paint, glass and chrome pick up the pink-gold
+  // horizon and the violet zenith instead of reflecting nothing. Built
+  // once at boot — no per-frame cost. Kept dim so it lifts materials
+  // without washing out the dusk lighting.
   const envBaker = new THREE.PMREMGenerator(S.renderer);
   const envScene = new THREE.Scene();
-  const envCanvas = document.createElement("canvas");
-  envCanvas.width = 256;
-  envCanvas.height = 128;
-  const skyCtx = envCanvas.getContext("2d");
-  const duskGrad = skyCtx.createLinearGradient(0, 0, 0, 128);
-  duskGrad.addColorStop(0.0, "#1f2b54");
-  duskGrad.addColorStop(0.42, "#7d4e6d");
-  duskGrad.addColorStop(0.62, "#f28c5a");
-  duskGrad.addColorStop(0.7, "#ffd494");
-  duskGrad.addColorStop(1.0, "#2a262c");
-  skyCtx.fillStyle = duskGrad;
-  skyCtx.fillRect(0, 0, 256, 128);
-  const envTex = new THREE.CanvasTexture(envCanvas);
-  envTex.colorSpace = THREE.SRGBColorSpace;
   envScene.add(new THREE.Mesh(
-    new THREE.SphereGeometry(50, 24, 16),
-    new THREE.MeshBasicMaterial({ map: envTex, side: THREE.BackSide })
+    new THREE.SphereGeometry(50, 32, 20),
+    skyShaderMaterial()
   ));
   S.scene.environment = envBaker.fromScene(envScene, 0.04).texture;
   S.scene.environmentIntensity = 0.55;
   envBaker.dispose();
-  envTex.dispose();
 }
 
 function hangSunGlow() {
@@ -89,10 +76,10 @@ function hangSunGlow() {
   // sun does not dim with distance the way a building does. Big and
   // bright enough to read against the sky dome's own baked glow.
   const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: glowTexture(), color: 0xffa050, transparent: true, opacity: 0.95,
+    map: glowTexture(), color: 0xffa050, transparent: true, opacity: 0.8,
     blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
   }));
-  sunSprite.scale.set(220, 220, 1);
+  sunSprite.scale.set(180, 180, 1);
   sunSprite.position.set(-40, 35, 440);
   sunSprite.renderOrder = -5;
   S.scene.add(sunSprite);
@@ -212,12 +199,49 @@ function frameLoop() {
     }
     updateBlobShadows();
     updateHud();
+    // The sun follows the player so its shadow frustum always covers
+    // the action, keeping the 16-degree light direction fixed.
+    if (S.sun) {
+      const px = S.player.pos.x, pz = S.player.pos.z;
+      S.sun.position.set(px - 180, 54, pz + 55);
+      S.sun.target.position.set(px, 0, pz);
+    }
+    updateCityLife(dt);
     if (S.time - lastSaveAt > 10) {
       lastSaveAt = S.time;
       saveGame();
     }
   } else if (S.mode === "busted") {
     updateHud();
+  } else if (S.mode === "menu") {
+    // The title screen is a real slow 3D push over the harbour: palm
+    // silhouettes in front, sunset water and wet-road traffic in the
+    // middle, SOLMAR TOWER and the pink-gold clouds far away.
+    updateMenuCamera(dt);
+    updateTraffic(dt);
+    updatePeds(dt);
+    updateTrafficLights();
+    updateCityLife(dt);
+  }
+  // Render every frame in every mode: the game loop used to rely on the
+  // harness forcing a render before each screenshot, which left the
+  // menu a black canvas and the live game unpainted between shots.
+  S.renderer.render(S.scene, S.camera);
+}
+
+// The menu camera: a slow 48-second push from over the sea toward the
+// harbour, drifting gently side to side, looking north over the city
+// toward SOLMAR TOWER.
+let menuT = 0;
+function updateMenuCamera(dt) {
+  menuT += dt;
+  const t = (menuT % 48) / 48;
+  const cam = S.camera;
+  cam.position.set(Math.sin(t * Math.PI * 2) * 12, 26 - t * 8, 280 - t * 70);
+  cam.lookAt(30, 22, -40);
+  if (Math.abs(cam.fov - 58) > 0.05) {
+    cam.fov = 58;
+    cam.updateProjectionMatrix();
   }
 }
 
@@ -237,8 +261,9 @@ export function stageChase() {
   // white marking filled the bottom-centre of the frame as a big
   // blank trapezoid. From z=100 the car has run to about z=114 by
   // the shutter, leaving the sign (z=164) about 50 m ahead — still
-  // big and readable. Staged at top speed already.
-  const escapeCar = spawnParkedCar(0, 100, 0, 0xd8b83a);
+  // big and readable. Staged at top speed already, in the low
+  // wide-body sports body.
+  const escapeCar = spawnParkedCar(0, 100, 0, 0xd8b83a, "sports");
   const hero = S.player;
   hero.pos.x = 0;
   hero.pos.z = 100;
@@ -306,6 +331,16 @@ export function stageChase() {
   // settles before the shutter — without this the cover is shot from
   // wherever the lens happened to drift to, not from behind the car.
   updateCamera(1);
+  // Then snap the driving camera itself to the low close chase angle
+  // (5.8 m behind, 2.0 m high, FOV 66 at top speed): the driving
+  // camera eases toward this spot a little per frame, and in headless
+  // only a frame or two runs before the shutter — the ease lands
+  // halfway and the lens ends up pressed on the car's roof. Snapping
+  // here puts it exactly where the driving loop will hold it.
+  S.camera.position.set(1.8, 2.0, 100 - 5.8);
+  S.camera.lookAt(0, 1.1, 108);
+  S.camera.fov = 66;
+  S.camera.updateProjectionMatrix();
 }
 
 export function stageCity() {
@@ -445,17 +480,17 @@ export function stageMission() {
   // the tower fills the upper frame and the near pavement drops out.
   // That level look could not see the tower sign at all — the lens
   // always points at the player's chest (y=1.55), so a sign 80 m up
-  // sits above the frame. Tilt the lens up (pitch -0.15, the clamp
-  // minimum) so the tower and its sign come into the upper frame: the
-  // sign's top edge sits at about 38.2 degrees up from the player, and
-  // at -0.12 the frame top only reached 37.8 degrees, cropping the
-  // sign's top by a hair; at -0.15 the frame top reaches about 39.5
-  // degrees, clearing it. The street still fills the lower half.
+  // sits above the frame. Tilt the lens up (pitch -0.10, with the
+  // walk camera's 0.35 m drop this rides at the old 0.5 m height) so
+  // the tower and its sign come into the upper frame below the mission
+  // banner: the sign's top edge sits at about 38.2 degrees up from
+  // the player, and at -0.10 the frame top reaches about 39.5 degrees,
+  // clearing it. The street still fills the lower half.
   // The camera sits closer (7 m, not 10 m) so it rides higher off the
   // ground: at 10 m the up-tilt put the lens almost on the pavement
   // and the near road washed out white at the glancing angle; at 7 m
   // the lens is half a metre up and the foreground reads as street.
-  S.camPitch = -0.15;
+  S.camPitch = -0.10;
   S.camDist = 7;
   // Street life: a talking pair further down the road for depth, a waiter
   // at the kerb in the lower-left foreground, one more walker on the
@@ -516,9 +551,10 @@ export function stageFoot() {
   // On road z=-40, facing Cafe Luna. Framing: the rooftop sign tops out
   // at y≈17, so the camera must sit low and look UP — but the old pitch
   // (-0.1) put the camera almost on the ground and the near pavement
-  // filled the bottom 40% of the frame. Pitch -0.06 at 12 m keeps the
-  // whole CAFE LUNA sign in frame while the parked cars and the
-  // foreground walker still fill the lower frame, and it lifts the
+  // filled the bottom 40% of the frame. Pitch -0.03 at 12 m (with the
+  // walk camera's 0.35 m drop this rides at the old 0.83 m height)
+  // keeps the whole CAFE LUNA sign in frame while the parked cars and
+  // the foreground walker still fill the lower frame, and it lifts the
   // frame bottom enough that the shadowed near pavement is a thin
   // strip instead of a dark void.
   hero.pos.x = -60;
@@ -526,7 +562,7 @@ export function stageFoot() {
   hero.group.position.set(-60, 0, -40);
   hero.heading = Math.PI; // facing north, walking toward Cafe Luna
   S.camYaw = 0; // camera south of the player, looking north at the sign
-  S.camPitch = -0.06;
+  S.camPitch = -0.03;
   S.camDist = 12;
   S.objectiveText = "";
   S.objectiveDist = null;
@@ -594,9 +630,10 @@ function launch() {
   S.renderer.shadowMap.enabled = true; S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   S.renderer.toneMapping = THREE.ACESFilmicToneMapping; S.renderer.toneMappingExposure = 1.12;
   S.scene = new THREE.Scene();
-  // Dusk sky + haze. The sky dome (city.js) paints the gradient; the fog
-  // colour matches the horizon so distant towers melt into the sunset.
-  S.scene.background = new THREE.Color(0xe8906a); S.scene.fog = new THREE.Fog(0xdd8a66, 150, 480);
+  // Dusk sky + haze. The sky dome (city.js) paints the shader gradient;
+  // the pink-gold exponential fog melts distant towers into the sunset.
+  S.scene.background = new THREE.Color(0xffc875);
+  S.scene.fog = new THREE.FogExp2(0xd97d78, 0.0024);
   S.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
   S.camera.position.set(0, 6, 12); S.clock = new THREE.Clock();
   rigLighting();

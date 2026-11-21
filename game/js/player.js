@@ -233,7 +233,11 @@ export function updatePlayer(dt) {
 // The camera sits over the right shoulder: both the camera and its look
 // target shift sideways (+right), so the character renders left of
 // centre and the centre crosshair aims past the right shoulder instead
-// of at the back of the head.
+// of at the back of the head. Tight framing: the offset is 0.52 m (not
+// the old 1.15 m), and the lens rides 0.35 m lower, so it looks up
+// more and the ground fills the bottom third of the frame instead of
+// the bottom half. The staged pitches stay as tuned — the lower lens
+// already adds the upward tilt the shots were tuned for.
 export function updateCamera(dt) {
   const p = S.player;
   if (!p || !S.camera) return;
@@ -245,13 +249,13 @@ export function updateCamera(dt) {
   const up = Math.sin(pitch);
   const sideX = Math.cos(yaw);
   const sideZ = -Math.sin(yaw);
-  const over = 1.15; // the lateral over-shoulder offset
+  const over = 0.52; // the lateral over-shoulder offset
   const tx = p.pos.x + sideX * over;
   const tz = p.pos.z + sideZ * over;
   const ty = 1.55;
   const cx = tx + backX * dist;
   const cz = tz + backZ * dist;
-  const cy = ty + up * dist;
+  const cy = ty + up * dist - 0.35;
   const cam = S.camera;
   cam.position.x += (cx - cam.position.x) * Math.min(1, dt * 10);
   cam.position.y += (cy - cam.position.y) * Math.min(1, dt * 10);
