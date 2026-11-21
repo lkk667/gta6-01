@@ -1,3 +1,4 @@
+// Phase 2 polish: warm lit shopfronts at street level, a glass curtain wall on the central tower, and a lit Cafe Luna storefront with a door and plaster facade.
 // Solmar City — the city itself.
 // A 9x9 road grid in a 380x380 m coastal city at dusk: pastel towers,
 // a park, a beach and an ocean, the landmarks, palms, streetlights and

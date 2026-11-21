@@ -1,3 +1,4 @@
+// Phase 2 polish: HUD panels hide when they have no text to show, so no empty dark capsule floats on screen.
 // Solmar City — HUD and minimap.
 // Reads S every frame and paints the DOM: wanted stars, cash, objective
 // with distance, health bar, ammo, speedometer (driving only), crosshair

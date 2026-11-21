@@ -1,3 +1,4 @@
+// Phase 2 polish: arms held naturally out with elbows slightly bent, pistol carried in the raised right hand, muzzle flash pinned to the gun's muzzle.
 // Solmar City — the on-foot character and the third-person camera.
 //
 // The figure is assembled from smooth forms, not boxes. A torso that

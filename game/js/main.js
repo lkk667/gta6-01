@@ -1,3 +1,4 @@
+// Phase 2 polish: sun glow toned down so the sky keeps its pink-orange layers instead of blowing out white, and the mission/foot framings re-shot to avoid blocked views and empty foregrounds.
 // Solmar City — entry point, frame loop, menus and scene staging.
 // This module ties the city, the player, traffic, police, missions,
 // combat, HUD, audio, saves and input together, drives the per-frame

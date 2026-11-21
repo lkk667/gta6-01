@@ -1,3 +1,4 @@
+// Phase 2 polish: torso overlaps the waistband and shoulders get ball joints so no light leaks through the joints; the legs read as one continuous figure.
 // Solmar City — people: realistic-proportion pedestrians.
 //
 // Forty pedestrians share one set of lathe-turned body-part geometries

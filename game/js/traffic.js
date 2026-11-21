@@ -1,3 +1,4 @@
+// Phase 2 polish: pedestrians are pushed back to the pavement whenever they wander within reach of a car's body, so nobody clips through a vehicle.
 // Solmar City — street life: traffic cars plus pedestrians with purpose.
 //
 // Every pedestrian walks with a purpose: most keep to the pavements,

@@ -1,3 +1,4 @@
+// Phase 2 polish: window texture repeated more densely so tower windows read at true scale, plus soft plaster for the cafe facade.
 // Solmar City — procedural canvas textures: asphalt, sidewalks,
 // facades, glow, wheels, plates. Everything is drawn in code, so the
 // game makes zero network requests for art.

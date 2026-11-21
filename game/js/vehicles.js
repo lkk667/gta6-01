@@ -1,3 +1,4 @@
+// Phase 2 polish: one-piece side-profile extrusion with a same-colour roof, recessed wheel arches showing the full 5-spoke wheels, and thin translucent blue-orange exhaust flames with faint tyre smoke.
 // Solmar City — cars: factory, arcade driving, stealing, parking.
 //
 // Every car is one solid side-profile extrusion: a single closed

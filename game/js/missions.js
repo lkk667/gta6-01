@@ -1,3 +1,4 @@
+// Phase 2 polish: mission banners hide themselves when empty, and the oversized yellow beacon marker is toned down to a small ground ring.
 // Solmar City — the story campaign.
 // Five jobs, then free roam. First comes Sunrise Delivery: fetch a
 // package from the Hideout and carry it to Marina Park ($300). Then
