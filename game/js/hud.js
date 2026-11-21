@@ -69,6 +69,9 @@ function paintObjective() {
     ? ' — ' + Math.round(S.objectiveDist) + ' m'
     : '';
   const text = base + suffix;
+  // An empty objective hides the pill entirely: no blank dark capsule
+  // floating over the scene in a staged shot.
+  dom.objective.style.display = text ? '' : 'none';
   if (text === lastObjective) return;
   lastObjective = text;
   dom.objective.textContent = text;

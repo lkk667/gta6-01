@@ -390,6 +390,41 @@ export function updatePeds(dt)
 }
 
 // One pedestrian, one frame: pose, state machine, walk cycle.
+// Pedestrians never clip into a car: if a walker ends up inside any
+// car's bounding box (within 1.8 m of its flank, 3.2 m of its ends),
+// push them out along the smaller-penetration axis, back toward the
+// sidewalk. Runs every frame, so walkers slide around parked and
+// moving cars instead of passing through them.
+function repelFromCars(ped) {
+  const spot = ped.mesh.position;
+  for (const list of [S.cars, S.trafficCars, S.cruisers]) {
+    if (!list) continue;
+    for (const car of list) {
+      const mesh = car.mesh;
+      if (!mesh) continue;
+      const dx = spot.x - mesh.position.x;
+      const dz = spot.z - mesh.position.z;
+      const h = mesh.rotation.y;
+      // Car-local frame: forward is (sin h, cos h), right is (cos h, -sin h).
+      const fwd = dx * Math.sin(h) + dz * Math.cos(h);
+      const side = dx * Math.cos(h) - dz * Math.sin(h);
+      if (Math.abs(fwd) < 3.2 && Math.abs(side) < 1.8) {
+        const pushF = 3.2 - Math.abs(fwd);
+        const pushS = 1.8 - Math.abs(side);
+        if (pushF < pushS) {
+          const s = Math.sign(fwd) || 1;
+          spot.x += Math.sin(h) * s * (pushF + 0.05);
+          spot.z += Math.cos(h) * s * (pushF + 0.05);
+        } else {
+          const s = Math.sign(side) || 1;
+          spot.x += Math.cos(h) * s * (pushS + 0.05);
+          spot.z += -Math.sin(h) * s * (pushS + 0.05);
+        }
+      }
+    }
+  }
+}
+
 function stepPedestrian(ped, dt) {
   // Knocked down: lie flat briefly, then get up.
   if (ped.stumble > 0) {
@@ -561,6 +596,8 @@ function stepPedestrian(ped, dt) {
     resolveCollisions(spot, 0.4);
   }
   ped.mesh.rotation.y = ped.heading;
+  // Keep every pedestrian out of every car, every frame.
+  repelFromCars(ped);
   // The walk cycle, or the pose for the current state. Two-segment
   // joints: the knee bends when its leg swings forward, the elbow
   // stays softly bent while walking, and standing figures breathe.
@@ -627,8 +664,8 @@ function stepPedestrian(ped, dt) {
     ped.shinR.rotation.x = 0;
     ped.armL.rotation.x = 0;
     ped.armR.rotation.x = 0;
-    ped.foreL.rotation.x = -0.15;
-    ped.foreR.rotation.x = -0.15;
+    ped.foreL.rotation.x = -0.26;
+    ped.foreR.rotation.x = -0.26;
     ped.chest.scale.y = breath;
   } else {
     ped.phone.visible = false;

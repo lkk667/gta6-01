@@ -465,15 +465,21 @@ export function stageMission() {
   // east. The tower's south face is 20 m north of that road, and no nearer
   // tower stands in the same column (looking north from road x=80, the
   // (100,-60) tower sits directly in front of it and hides it).
-  // Stand at x=-20, not -40: twenty metres closer to the tower, so the
-  // west-face sign reads bigger in the frame instead of a distant speck.
-  // The 22 m tower row north of this road still clears the sightline —
-  // the line of sight to the sign at y=68 passes well above it.
-  hero.pos.x = -20;
+  // Stand at x=-12, not -20: eight metres closer to the intersection, so
+  // the crosswalk at (0,-80) and its crosser land in the lower frame
+  // instead of a distant speck, and the two staged cars frame the
+  // player instead of sitting far down the road. The 22 m tower row
+  // north of this road still clears the sightline — the line of sight
+  // to the sign at y=68 passes well above it.
+  hero.pos.x = -12;
   hero.pos.z = -80;
-  hero.group.position.set(-20, 0, -80);
+  hero.group.position.set(-12, 0, -80);
   hero.heading = Math.PI / 2; // facing east, down road z=-80 toward the tower
-  S.camYaw = -Math.PI / 2;
+  // Pan the lens 15 degrees toward the tower: the tower stands 9.5
+  // degrees north of due east from here, so camYaw -PI/2 + 0.26 swings
+  // the view across it and lands the sign just right of mid-frame,
+  // with the street running into the depth on both sides.
+  S.camYaw = -Math.PI / 2 + 0.26;
   // Framing fix: the camera used to sit almost on the ground looking up
   // (pitch clamped to -0.15), so the near pavement filled the bottom half
   // of the frame. Raised to 0.22 at 10 m, the camera looks nearly level:
@@ -492,16 +498,18 @@ export function stageMission() {
   // the lens is half a metre up and the foreground reads as street.
   S.camPitch = -0.10;
   S.camDist = 7;
-  // Street life: a talking pair further down the road for depth, a waiter
-  // at the kerb in the lower-left foreground, one more walker on the
-  // north sidewalk close to the camera, and one waiting at the south
-  // kerb in the lower-right foreground, so the lower frame has people
-  // in it instead of bare pavement. Last of all, a crosser standing on
-  // the crosswalk at the intersection (0,-80): the headless clock runs
-  // so slowly that a walker placed further back never reaches the
-  // stripes by the shutter, so it is staged on the crossing itself,
-  // mid-stride across the east-west road.
-  poseWalkers([[0, -82, 1.2, "talk", 1], [1.5, -82, -1.2, "talk", 0], [-21.4, -83.5, 0.6, "wait"], [-26, -73.5, -1.6, "wait"], [-24, -71, 0.5, "wait"], [0, -80, 0, "cross"]]);
+  // Street life: a talking pair further down the road for depth, and
+  // three waiters in the lower frame close to the lens — one on each
+  // side of the road just ahead of the player, and one further up the
+  // north kerb — so the lower frame has people in it instead of bare
+  // pavement. Last of all, a crosser standing on the crosswalk at the
+  // intersection (0,-80): the headless clock runs so slowly that a
+  // walker placed further back never reaches the stripes by the
+  // shutter, so it is staged on the crossing itself, mid-stride
+  // across the east-west road. The player now stands eight metres
+  // closer to the intersection, so the crosser and the crosswalk
+  // stripes read in the lower frame instead of a distant speck.
+  poseWalkers([[0, -82, 1.2, "talk", 1], [1.5, -82, -1.2, "talk", 0], [-14, -78, 0.6, "wait"], [-14, -82, -1.6, "wait"], [-13, -74, 0.5, "wait"], [0, -80, 0, "cross"]]);
   // The crosser needs its crossing spelled out: across the east-west road
   // z=-80, from the north sidewalk to the south one. poseWalkers only
   // sets the mode; without these the defaults would send it across the
@@ -511,23 +519,23 @@ export function stageMission() {
   debugCompleteMission1();
   // debugCompleteMission1 teleports the player to the park; put them back
   // on the road with the tower in view.
-  hero.pos.x = -20;
+  hero.pos.x = -12;
   hero.pos.z = -80;
-  hero.group.position.set(-20, 0, -80);
+  hero.group.position.set(-12, 0, -80);
   hero.heading = Math.PI / 2;
-  // A car parked in the lower-right foreground, close enough to the
-  // camera (about 7 m now) that it reads as a car in the street and
-  // fills the lower frame instead of leaving it bare: its roof stays
-  // below the frame centre and its plate is fully in frame, not cut
-  // off at the right edge. It sits far enough down the road (east)
-  // that the low, upward-tilted lens looks over its roof at the tower
-  // instead of into its side.
-  spawnParkedCar(-21, -75.5, Math.PI / 2, 0xd84a4a);
-  // A second car in the lower-left foreground, just ahead of the lens
-  // on the road itself, so the bottom of the frame has cars on both
-  // sides instead of one car and a wide empty stretch of tarmac. It
-  // sits low enough (roof ~1.5 m) that it never hides the tower.
-  spawnParkedCar(-21, -84.5, Math.PI / 2, 0x3a7ad8);
+  // A car parked in the lower-right foreground, far enough down the
+  // road (about 19 m from the lens now) that it reads whole — roof,
+  // plate and all — instead of being cropped by the frame edge, and
+  // angled a quarter-turn toward the camera so it shows a three-quarter
+  // view instead of a flat side. It sits low enough (roof ~1.5 m) that
+  // it never hides the tower.
+  spawnParkedCar(-8, -75.5, Math.PI / 2 + 0.25, 0xd84a4a, "sedan");
+  // A second car in the lower-left foreground, the same distance down
+  // the road on the far kerb, angled the other way, so the bottom of
+  // the frame has cars on both sides instead of one car and a wide
+  // empty stretch of tarmac. It sits low enough (roof ~1.5 m) that it
+  // never hides the tower.
+  spawnParkedCar(-6, -84.5, Math.PI / 2 - 0.25, 0x3a7ad8, "sedan");
   // The completion banner stands alone. The objective line is left
   // blank on purpose: its pill sits across the very top of the frame,
   // exactly where the tower sign now lands, and would hide the sign's
@@ -551,56 +559,72 @@ export function stageFoot() {
   // On road z=-40, facing Cafe Luna. Framing: the rooftop sign tops out
   // at y≈17, so the camera must sit low and look UP — but the old pitch
   // (-0.1) put the camera almost on the ground and the near pavement
-  // filled the bottom 40% of the frame. Pitch -0.03 at 12 m (with the
+  // filled the bottom 40% of the frame. Pitch -0.03 at 14 m (with the
   // walk camera's 0.35 m drop this rides at the old 0.83 m height)
   // keeps the whole CAFE LUNA sign in frame while the parked cars and
   // the foreground walker still fill the lower frame, and it lifts the
   // frame bottom enough that the shadowed near pavement is a thin
-  // strip instead of a dark void.
-  hero.pos.x = -60;
+  // strip instead of a dark void. The extra two metres of distance
+  // (14, not 12) shrink the sign just enough to clear the frame top:
+  // at 12 m the letters' tops were cut, and tilting up further only
+  // dropped the lens onto the pavement and made the planters loom.
+  hero.pos.x = -58;
   hero.pos.z = -40;
-  hero.group.position.set(-60, 0, -40);
+  hero.group.position.set(-58, 0, -40);
   hero.heading = Math.PI; // facing north, walking toward Cafe Luna
-  S.camYaw = 0; // camera south of the player, looking north at the sign
+  // The lens sits south of the player, looking north at the sign, and
+  // tilts 5 degrees east so the shot runs slightly diagonally into the
+  // street depth instead of straight at the cafe wall. A wider tilt
+  // cut the top off the CAFE LUNA sign: off-axis the frame top drops,
+  // and the sign's far corner is the first thing to go.
+  S.camYaw = -0.08; // camera south of the player, looking north at the sign
   S.camPitch = -0.03;
-  S.camDist = 12;
+  S.camDist = 14;
   S.objectiveText = "";
   S.objectiveDist = null;
   // Cafe street life, each doing something different: a talking pair at
   // the outdoor tables, one on the phone by the cafe, one sitting on a
-  // chair, and one waiting at the kerb close to the camera so the lower
-  // frame has a person in it instead of bare pavement.
-  poseWalkers([[-54, -47, -2.2, "talk", 1], [-57, -47, 2.2, "talk", 0], [-66, -47, 0.8, "phone"], [-61.3, -49.5, 0, "sit"], [-60, -33.5, 0.3, "wait"]]);
+  // chair, and one waiting at the north kerb in the mid-ground, so the
+  // lower frame has a person in it instead of bare pavement. The
+  // waiting pedestrian used to stand right in front of the lens and
+  // fill the centre of the frame.
+  poseWalkers([[-54, -47, -2.2, "talk", 1], [-57, -47, 2.2, "talk", 0], [-66, -47, 0.8, "phone"], [-61.3, -49.5, 0, "sit"], [-55, -44, 0.3, "wait"]]);
   // A taxi waiting at the kerb in the left foreground, for depth, and a
   // car parked just ahead of the camera on the right, to balance the
-  // lower frame. Both sit close to the camera's line of sight.
+  // lower frame. The green car sits well east of the hero's line of
+  // sight, so the protagonist is never hidden behind it.
   spawnParkedCar(-72, -38, Math.PI / 2, 0xe8c832, "taxi");
-  spawnParkedCar(-57.4, -36, Math.PI / 2, 0x4ad87a);
+  spawnParkedCar(-52, -36, Math.PI / 2, 0x4ad87a, "sedan");
   // The bottom of the frame used to be a dark empty band of pavement:
   // the camera sits low looking up at the sign, so the near ground
   // fills the lower quarter with nothing on it. Fill it with street
-  // furniture right in front of the lens — a bench on the right and a
-  // planter on the left, both about three metres ahead of the camera,
+  // furniture in the lower frame — a bench on the right and a small
+  // planter on the left, both in shot and clear of the lens itself,
   // low enough to stay out of the sign and the cafe but tall enough to
-  // break the empty expanse into shapes. The camera itself stays put
-  // (the sign is only just inside the top of the frame as it is).
+  // break the empty expanse into shapes. The planter used to sit
+  // almost on the lens and read as a giant black mass; it now stands
+  // off to the side, smaller and lighter green. Both pieces are pale
+  // enough to read against the shadowed road: the first version used
+  // dark wood and dark green, which vanished into the dark pavement.
+  // The camera itself stays put (the sign is only just inside the top
+  // of the frame as it is).
   const seat = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2, 0.5, 0.7),
-    new THREE.MeshLambertMaterial({ color: 0x8a6a42 })
+    new THREE.BoxGeometry(2.2, 0.7, 0.8),
+    new THREE.MeshLambertMaterial({ color: 0xc8a878 })
   );
-  seat.position.set(-55, 0.25, -31); seat.castShadow = true;
+  seat.position.set(-56.5, 0.35, -28.5); seat.castShadow = true;
   S.scene.add(seat);
   const pot = new THREE.Mesh(
     new THREE.CylinderGeometry(0.55, 0.65, 0.8, 8),
-    new THREE.MeshLambertMaterial({ color: 0x5a6a4a })
+    new THREE.MeshLambertMaterial({ color: 0x8a7a5a })
   );
-  pot.position.set(-62, 0.4, -31); pot.castShadow = true;
+  pot.position.set(-60, 0.4, -30); pot.castShadow = true;
   S.scene.add(pot);
   const bush = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 8, 6),
-    new THREE.MeshLambertMaterial({ color: 0x3f8a3a })
+    new THREE.SphereGeometry(0.35, 8, 6),
+    new THREE.MeshLambertMaterial({ color: 0x6aba5a })
   );
-  bush.position.set(-62, 1.0, -31); bush.castShadow = true;
+  bush.position.set(-60, 0.85, -30); bush.castShadow = true;
   S.scene.add(bush);
   // Snap the lens to its staged spot at once (see stageChase): the
   // headless clock lags, so the per-frame ease never settles in time.

@@ -5,8 +5,8 @@
 // helpers the other systems build on. All textures are procedural (see
 // textures.js for the surface library); nothing is fetched.
 // The towers break the uniform grid: facades carry windows of different
-// sizes with balconies and air-conditioner boxes, each tower sits on a
-// darker ground-floor plinth, rooflines step back at different heights,
+// sizes with balconies and air-conditioner boxes, each tower sits on lit
+// ground-floor shops, rooflines step back at different heights,
 // and the curbs stand out as a real edge between road and pavement.
 
 import * as THREE from '../vendor/three.module.min.js';
@@ -95,10 +95,12 @@ export function skyShaderMaterial() {
         float sunFacing = clamp(dot(dir, sunDir) * 0.5 + 0.5, 0.0, 1.0);
         vec3 cloudCol = mix(shadeSide, sunSide, sunFacing);
         col = mix(col, cloudCol, clouds * 0.9);
-        // Sun disc with a soft Mie-scatter halo.
+        // Sun disc with a soft Mie-scatter halo. Both coefficients
+        // are cut 40% so the sky by the sun keeps warm pink-orange
+        // layers instead of blowing out to pure white.
         float d = max(dot(dir, sunDir), 0.0);
-        col += vec3(1.0, 0.85, 0.6) * pow(d, 90.0) * 1.0;
-        col += vec3(1.0, 0.62, 0.35) * pow(d, 8.0) * 0.22;
+        col += vec3(1.0, 0.85, 0.6) * pow(d, 90.0) * 0.6;
+        col += vec3(1.0, 0.62, 0.35) * pow(d, 8.0) * 0.13;
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -378,6 +380,9 @@ export function updateBlobShadows() {
     if (entry.follow) {
       entry.mesh.position.x = entry.follow.position.x;
       entry.mesh.position.z = entry.follow.position.z;
+      // A blob hides with its owner: the player's blob must not stay
+      // behind on the road as a dark ellipse while they drive away.
+      entry.mesh.visible = entry.follow.visible !== false;
     }
   }
 }
@@ -572,6 +577,40 @@ function shopSignTex(name) {
   return tex;
 }
 
+// Ground-floor shops for a tower: warm lit glass and pale columns on
+// each face, so the street level reads as shops instead of a blank
+// dark band. Central towers get all four faces; outer towers get the
+// south face only, which is the one the street cameras see.
+function groundFloorShops(bx, bz, bw, bd) {
+  const central = Math.abs(bx) <= 100 && Math.abs(bz) <= 100;
+  const glassMat = new THREE.MeshBasicMaterial({ color: 0xffc27a });
+  const colMat = flat(0xd8d2c4);
+  const faces = [
+    { along: "x", at: bz + bd / 2 + 0.03, fixed: bz + bd / 2 + 0.08, w: bw, rotY: 0 },
+    { along: "x", at: bz - bd / 2 - 0.03, fixed: bz - bd / 2 - 0.08, w: bw, rotY: Math.PI },
+  ];
+  if (central) {
+    faces.push(
+      { along: "z", at: bx + bw / 2 + 0.03, fixed: bx + bw / 2 + 0.08, w: bd, rotY: Math.PI / 2 },
+      { along: "z", at: bx - bw / 2 - 0.03, fixed: bx - bw / 2 - 0.08, w: bd, rotY: -Math.PI / 2 },
+    );
+  }
+  for (const face of faces) {
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(face.w * 0.85, 2.6), glassMat);
+    glass.rotation.y = face.rotY;
+    if (face.along === "x") glass.position.set(bx, 1.85, face.at);
+    else glass.position.set(face.at, 1.85, bz);
+    S.scene.add(glass);
+    for (let k = 0; k < 4; k += 1) {
+      const t = -face.w / 2 + ((k + 0.5) * face.w) / 4;
+      const col = face.along === "x"
+        ? addBox(0.35, 3.4, 0.12, colMat, bx + t, 1.7, face.fixed)
+        : addBox(0.12, 3.4, 0.35, colMat, face.fixed, 1.7, bz + t);
+      col.castShadow = false;
+    }
+  }
+}
+
 function erectTower(bx, bz, bw, bd, bh, paint) {
   // Each block gets its own facade style so neighbours don't match:
   // Art Deco pastels, warm stone, dusk mauve, or a glass curtain wall,
@@ -580,6 +619,11 @@ function erectTower(bx, bz, bw, bd, bh, paint) {
   // balconies and air-conditioner boxes, so no two faces are identical.
   const kind = Math.abs(Math.floor(bx * 0.7 + bz * 1.3)) % 6;
   const skin = facadeMaps(kind);
+  // Windows twice as dense and half the size: the texture tiles 2.2
+  // times across each face, so a tower reads at its real hundred-metre
+  // scale instead of a toy house with giant windows.
+  skin.map.repeat.set(2.2, 2.2);
+  skin.emissiveMap.repeat.set(2.2, 2.2);
   const wallMat = new THREE.MeshStandardMaterial({
     map: skin.map, emissive: 0xffffff, emissiveMap: skin.emissiveMap,
     emissiveIntensity: 1.15, roughness: skin.roughness, metalness: skin.metalness,
@@ -603,11 +647,13 @@ function erectTower(bx, bz, bw, bd, bh, paint) {
     addBox(bw + 0.3, 0.8, 0.3, flat(0x2c3a4a), bx, bh + 0.4, bz + bd / 2);
     addBox(bw + 0.3, 0.8, 0.3, flat(0x2c3a4a), bx, bh + 0.4, bz - bd / 2);
   }
-  // A stone plinth at the ground floor, a little wider than the tower,
-  // so the building meets the pavement instead of floating on it.
-  const base = addBox(bw + 0.6, 1.1, bd + 0.6, flat(0x4a4440), bx, 0.55, bz);
+  // The ground floor (0–3.5 m) is shops, not a dead black band: a
+  // light-grey base, warm lit shop windows and pale columns on every
+  // face in the centre, south face only further out.
+  const base = addBox(bw + 0.6, 0.5, bd + 0.6, flat(0xcfc8bc), bx, 0.25, bz);
   base.castShadow = false;
   base.receiveShadow = true;
+  groundFloorShops(bx, bz, bw, bd);
   // A varied roofline: a setback upper floor on about a third of towers,
   // sometimes shifted off-centre so the skyline steps instead of lining
   // up flat.
@@ -938,7 +984,24 @@ function hangClouds() {
 
 function buildCafe() {
   const cx = -60, cz = -60;
-  const base = addBox(24, 9, 18, flat(0xf2d8c8), cx, 4.5, cz);
+  // Soft stucco on the facade: warm plaster with tonal drift instead
+  // of a flat slab, so the wall reads as a real cafe front.
+  const stuccoTex = paintCanvas(512, 256, (g, w, h) => {
+    g.fillStyle = '#f2d8c8';
+    g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 90; i += 1) {
+      const x = dice() * w, y = dice() * h, r = 12 + dice() * 40;
+      const grad = g.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, dice() < 0.5 ? 'rgba(224,196,168,0.35)' : 'rgba(255,240,220,0.35)');
+      grad.addColorStop(1, 'rgba(255,240,220,0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fill();
+    }
+  }, 2, 1);
+  const stuccoMat = new THREE.MeshStandardMaterial({ map: stuccoTex, roughness: 0.9 });
+  const base = addBox(24, 9, 18, stuccoMat, cx, 4.5, cz);
   void base;
   S.colliders.push({ x: cx, z: cz, r: 15 });
   placeBlob(cx, cz, 30, 0.025);
@@ -959,13 +1022,37 @@ function buildCafe() {
   addBox(22, 0.22, 0.22, trimMat, cx, 4.4, cz + 10.6);
   // The sign's pink glow streaks across the wet road in front.
   addWetStreak(cx, -36, 8, 0xff5a9a, false);
-  // Glowing doorway.
+  // Glowing doorway with a dark frame, and warm lit glass windows
+  // flanking it under the awning, so the cafe front is a lit interior
+  // instead of a flat brown wall.
+  const doorFrame = new THREE.Mesh(
+    new THREE.PlaneGeometry(4.2, 5.6),
+    new THREE.MeshLambertMaterial({ color: 0x2c241c })
+  );
+  doorFrame.position.set(cx, 2.5, cz + 9.12);
+  S.scene.add(doorFrame);
   const door = new THREE.Mesh(
     new THREE.PlaneGeometry(3.4, 5),
     new THREE.MeshBasicMaterial({ color: 0xffd27a })
   );
   door.position.set(cx, 2.5, cz + 9.15);
   S.scene.add(door);
+  for (const side of [-1, 1]) {
+    const winFrame = new THREE.Mesh(
+      new THREE.PlaneGeometry(5.1, 3.8),
+      new THREE.MeshLambertMaterial({ color: 0x2c241c })
+    );
+    winFrame.position.set(cx + side * 5.5, 2.2, cz + 9.12);
+    S.scene.add(winFrame);
+    const winGlass = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.5, 3.2),
+      new THREE.MeshBasicMaterial({ color: 0xffd27a })
+    );
+    winGlass.position.set(cx + side * 5.5, 2.2, cz + 9.18);
+    S.scene.add(winGlass);
+    // A mullion bar down the middle of each window.
+    addBox(0.12, 3.2, 0.06, flat(0x2c241c), cx + side * 5.5, 2.2, cz + 9.22);
+  }
   // Rooftop sign: ONE single-sided plane. (v2 had a DoubleSide plane plus a
   // 180-degree clone behind it, and the mirrored back text bled through.)
   const tex = neonSign([
@@ -1021,18 +1108,18 @@ function buildTowerLandmark() {
   // it reads above the tower row from the street. At 95 m the (20,-100)
   // tower hid it completely from road z=-80.
   // A glass curtain wall for the landmark: clone the facade maps so the
-  // 130 m face can repeat the window grid three times up its height
-  // without changing the repeat on every other glass tower.
+  // 130 m face can repeat the window grid 2.2 times across and 6.6 times
+  // up its height without changing the repeat on every other glass tower.
   const skin = facadeMaps(5);
   const skinMap = skin.map.clone();
-  skinMap.repeat.set(1, 3);
+  skinMap.repeat.set(2.2, 6.6);
   skinMap.needsUpdate = true;
   const skinGlow = skin.emissiveMap.clone();
-  skinGlow.repeat.set(1, 3);
+  skinGlow.repeat.set(2.2, 6.6);
   skinGlow.needsUpdate = true;
   const wallMat = new THREE.MeshStandardMaterial({
     map: skinMap, emissive: 0xffffff, emissiveMap: skinGlow,
-    emissiveIntensity: 1.2, roughness: skin.roughness, metalness: skin.metalness,
+    emissiveIntensity: 1.5, roughness: skin.roughness, metalness: skin.metalness,
   });
   const tower = addBox(26, 130, 26, wallMat, tx, 65, tz);
   tower.castShadow = true;

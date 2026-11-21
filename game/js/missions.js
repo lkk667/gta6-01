@@ -70,16 +70,29 @@ function ensureBeacon() {
   group.userData.ring = ring;
   S.scene.add(group);
   S.beacon = group;
-  // The nav arrow: a gold chevron floating above the player, pointing at
-  // the target. Hidden while driving (from the low chase camera it loomed
-  // like a paper plane) and hidden when there is no target. Scaled to
-  // about half size so it reads as a quest marker, not a billboard.
-  guideArrow = new THREE.Mesh(
-    new THREE.ConeGeometry(0.55, 1.4, 4),
-    new THREE.MeshBasicMaterial({ color: 0xffd94a })
+  // The nav marker: a small flat ring at the player's feet with a
+  // wedge pointing at the target — a ground indicator, not a billboard
+  // floating over the player's head.
+  guideArrow = new THREE.Group();
+  const navRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 0.68, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffd94a, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
   );
-  guideArrow.rotation.x = Math.PI / 2; // point forward, not up
-  guideArrow.scale.set(0.55, 0.55, 0.55);
+  navRing.rotation.x = -Math.PI / 2;
+  navRing.position.y = 0.06;
+  guideArrow.add(navRing);
+  const wedgeShape = new THREE.Shape();
+  wedgeShape.moveTo(0, -1.05);
+  wedgeShape.lineTo(0.28, -0.55);
+  wedgeShape.lineTo(-0.28, -0.55);
+  wedgeShape.closePath();
+  const wedge = new THREE.Mesh(
+    new THREE.ShapeGeometry(wedgeShape),
+    new THREE.MeshBasicMaterial({ color: 0xffd94a, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
+  );
+  wedge.rotation.x = -Math.PI / 2;
+  wedge.position.y = 0.06;
+  guideArrow.add(wedge);
   guideArrow.visible = false;
   S.scene.add(guideArrow);
 } // end of ensureBeacon()
@@ -308,17 +321,16 @@ export function updateBeacon(dt) {
     const s = 1 + Math.sin(S.time * 3) * 0.12;
     ring.scale.set(s, s, 1);
   }
-  // The nav arrow floats above the player and points at the target. It is
-  // hidden while driving and when there is no target.
+  // The nav marker sits flat on the ground at the player's feet and
+  // points at the target. It is hidden while driving and when there is
+  // no target.
   if (!beaconTarget || !S.onFoot || !S.player || S.mode !== 'playing') {
     guideArrow.visible = false;
     return;
   }
   guideArrow.visible = true;
-  guideArrow.position.set(S.player.pos.x, 2.5, S.player.pos.z);
+  guideArrow.position.set(S.player.pos.x, 0, S.player.pos.z);
   const dx = beaconTarget.x - S.player.pos.x;
   const dz = beaconTarget.z - S.player.pos.z;
   guideArrow.rotation.y = Math.atan2(dx, dz);
-  // Bob gently so it reads as a floating marker.
-  guideArrow.position.y = 2.5 + Math.sin(S.time * 2.5) * 0.15;
 }

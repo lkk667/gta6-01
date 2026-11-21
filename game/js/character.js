@@ -241,13 +241,16 @@ export function assemblePedestrian(role) {
   const figure = new THREE.Group();
 
   // Pelvis and torso: the chest is kept as its own group so the walk
-  // cycle can breathe it in and out for standing figures.
+  // cycle can breathe it in and out for standing figures. The chest
+  // sits 0.06 m lower than it used to, so the torso bottom overlaps
+  // the pelvis and waistband instead of leaving a light gap at the
+  // waist.
   const pelvis = new THREE.Mesh(parts.pelvis, bottomMat);
   pelvis.position.y = 0.8;
   pelvis.scale.set(1.15, 1, 0.8);
   figure.add(pelvis);
   const chest = new THREE.Group();
-  chest.position.y = 0.84;
+  chest.position.y = 0.78;
   figure.add(chest);
   const torso = new THREE.Mesh(parts.torso, shirtMat);
   torso.scale.set(1.12, 1, 0.78);
@@ -327,6 +330,10 @@ export function assemblePedestrian(role) {
     const hip = new THREE.Group();
     hip.position.set(sideX, 0.82, 0);
     figure.add(hip);
+    // A ball at the hip joint, so the thigh top never shows a light
+    // gap against the pelvis when the leg swings.
+    const hipBall = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), bottomMat);
+    hip.add(hipBall);
     const thighMat = bareLegs ? skinMat : bottomMat;
     const thigh = new THREE.Mesh(parts.thigh, thighMat);
     hip.add(thigh);
@@ -356,7 +363,14 @@ export function assemblePedestrian(role) {
   function buildArm(sideX) {
     const shoulder = new THREE.Group();
     shoulder.position.set(sideX, 1.4, 0);
+    // Arms hang 8 degrees out from the body, not straight down the
+    // sides. The walk cycle only writes rotation.x, so this stays.
+    shoulder.rotation.z = sideX < 0 ? -0.14 : 0.14;
     figure.add(shoulder);
+    // A ball at the shoulder joint, so the upper arm never shows a
+    // light gap against the torso when it swings.
+    const shoulderBall = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), shirtMat);
+    shoulder.add(shoulderBall);
     const longSleeve = kind === "police";
     const upper = new THREE.Mesh(parts.upperArm, longSleeve ? shirtMat : skinMat);
     shoulder.add(upper);

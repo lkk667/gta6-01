@@ -81,52 +81,88 @@ export function buildPlayer() {
   hatBrim.position.set(0, 1.82, 0.26);
   root.add(hatBrim);
 
-  // Two slim legs with a visible gap, pivoting at the hip so the walk
-  // swing reads from the joint instead of the middle of the limb. Each
-  // leg is a capsule — a cylinder with round caps — so there is no hard
-  // edge anywhere on it. The shape is shifted down so its top sits at
-  // the mesh origin (the hip), and the mesh is what swings.
-  const legShape = new THREE.CapsuleGeometry(0.085, 0.6, 6, 12);
-  legShape.translate(0, -0.36, 0);
-  const shinL = new THREE.Mesh(legShape, bottom);
-  shinL.position.set(-0.13, 0.78, 0);
-  shinL.castShadow = true;
-  root.add(shinL);
-  const shinR = shinL.clone();
-  shinR.position.x = 0.13;
-  root.add(shinR);
-  // Arms hang at the sides, pivoting at the shoulder, capsules again.
-  const armShape = new THREE.CapsuleGeometry(0.07, 0.5, 6, 12);
-  armShape.translate(0, -0.3, 0);
-  const foreL = new THREE.Mesh(armShape, top);
-  foreL.position.set(-0.34, 1.42, 0);
-  root.add(foreL);
-  const foreR = foreL.clone();
-  foreR.position.x = 0.34;
-  root.add(foreR);
-  // Shoes ride on the legs so they swing with the walk, toes forward:
-  // a capsule laid flat, rounded at the toe and the heel.
-  const shoeShape = new THREE.CapsuleGeometry(0.075, 0.14, 4, 10);
-  shoeShape.rotateX(Math.PI / 2);
-  const shoeL = new THREE.Mesh(shoeShape, foot);
-  shoeL.position.set(0, -0.74, 0.04);
-  shinL.add(shoeL);
-  const shoeR = new THREE.Mesh(shoeShape, foot);
-  shoeR.position.set(0, -0.74, 0.04);
-  shinR.add(shoeR);
+  // A hip block bridging torso and legs, so no light shows through
+  // the waist: it overlaps the chest bottom and both thigh tops.
+  const hips = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 8), bottom);
+  hips.position.y = 0.82;
+  hips.scale.set(1.15, 0.6, 0.8);
+  root.add(hips);
 
-  // A pistol in the right hand, held forward. The muzzle flash is a
-  // child of this gun mesh, so flash and gun can never drift apart.
+  // Two-segment legs: a thigh pivoting at the hip, a shin pivoting at
+  // the knee, a shoe riding on the shin. The hip groups are what the
+  // walk cycle swings; the knee groups bend as the leg swings forward,
+  // so the legs read as legs instead of two vertical sticks.
+  function buildLeg(sideX) {
+    const hip = new THREE.Group();
+    hip.position.set(sideX, 0.78, 0);
+    root.add(hip);
+    const thighShape = new THREE.CapsuleGeometry(0.09, 0.28, 6, 12);
+    thighShape.translate(0, -0.19, 0);
+    const thigh = new THREE.Mesh(thighShape, bottom);
+    thigh.castShadow = true;
+    hip.add(thigh);
+    const knee = new THREE.Group();
+    knee.position.y = -0.37;
+    hip.add(knee);
+    const shinShape = new THREE.CapsuleGeometry(0.08, 0.3, 6, 12);
+    shinShape.translate(0, -0.19, 0);
+    const shin = new THREE.Mesh(shinShape, bottom);
+    shin.castShadow = true;
+    knee.add(shin);
+    const shoeShape = new THREE.CapsuleGeometry(0.075, 0.14, 4, 10);
+    shoeShape.rotateX(Math.PI / 2);
+    const shoe = new THREE.Mesh(shoeShape, foot);
+    shoe.position.set(0, -0.37, 0.04);
+    knee.add(shoe);
+    return { hip, knee };
+  }
+  const legL = buildLeg(0.13);
+  const legR = buildLeg(-0.13);
+
+  // Two-segment arms: an upper arm pivoting at the shoulder, a forearm
+  // pivoting at the elbow. The shoulder groups hang 8 degrees out from
+  // the body and carry a ball at the joint, so no light gap shows at
+  // the armpit; the elbows stay softly bent. The shoulder groups are
+  // what the walk cycle swings; the elbow groups carry the bend.
+  function buildArm(sideX) {
+    const shoulder = new THREE.Group();
+    shoulder.position.set(sideX, 1.42, 0);
+    shoulder.rotation.z = sideX < 0 ? -0.14 : 0.14;
+    root.add(shoulder);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), top);
+    shoulder.add(ball);
+    const upperShape = new THREE.CapsuleGeometry(0.07, 0.24, 6, 12);
+    upperShape.translate(0, -0.15, 0);
+    const upper = new THREE.Mesh(upperShape, top);
+    shoulder.add(upper);
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.28;
+    shoulder.add(elbow);
+    const foreShape = new THREE.CapsuleGeometry(0.06, 0.22, 6, 12);
+    foreShape.translate(0, -0.14, 0);
+    const fore = new THREE.Mesh(foreShape, top);
+    elbow.add(fore);
+    return { shoulder, elbow };
+  }
+  const armL = buildArm(0.34);
+  const armR = buildArm(-0.34);
+
+  // A pistol in the right hand. The muzzle flash is a child of this
+  // gun mesh, so flash and gun can never drift apart. The pistol is a
+  // child of the right forearm: its barrel runs down the forearm, so
+  // the gun points where the arm points — level and forward when the
+  // player aims, down at the side when the arm hangs.
   const iron = new THREE.MeshLambertMaterial({ color: 0x1c1e22 });
   const pistol = new THREE.Group();
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.46), iron);
-  barrel.position.z = 0.18;
+  barrel.position.set(0, 0.05, 0.2);
   pistol.add(barrel);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.24, 0.12), iron);
-  grip.position.set(0, -0.14, -0.02);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.22, 0.12), iron);
+  grip.position.set(0, -0.05, -0.02);
   pistol.add(grip);
-  pistol.position.set(0.34, 1.02, 0.28);
-  root.add(pistol);
+  pistol.rotation.x = Math.PI / 2;
+  pistol.position.set(0, -0.28, 0.03);
+  armR.elbow.add(pistol);
 
   // The flash is a four-point star (two crossed double-sided planes)
   // bound to the barrel tip — never a yellow ball, never a ground
@@ -135,14 +171,14 @@ export function buildPlayer() {
   const star = makeFlashTexture();
   const flashMat = new THREE.MeshBasicMaterial({ map: star, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
   const flashA = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7), flashMat);
-  flashA.position.z = 0.72;
+  flashA.position.set(0, 0.05, 0.72);
   pistol.add(flashA);
   const flashB = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.7), flashMat);
-  flashB.position.z = 0.72;
+  flashB.position.set(0, 0.05, 0.72);
   flashB.rotation.z = Math.PI / 4;
   pistol.add(flashB);
   const flashLight = new THREE.PointLight(0xffc832, 0, 5);
-  flashLight.position.z = 0.7;
+  flashLight.position.set(0, 0.05, 0.7);
   pistol.add(flashLight);
 
   root.position.set(0, 0, -8);
@@ -150,7 +186,10 @@ export function buildPlayer() {
   attachBlob(root, 1.6, 0.03);
 
   S.player = {
-    group: root, torso: chest, head, legL: shinL, legR: shinR, armL: foreL, armR: foreR, gun: pistol, flashMat, flashLight,
+    group: root, torso: chest, head,
+    legL: legL.hip, legR: legR.hip, shinL: legL.knee, shinR: legR.knee,
+    armL: armL.shoulder, armR: armR.shoulder, elbowL: armL.elbow, elbowR: armR.elbow,
+    gun: pistol, flashMat, flashLight,
     pos: root.position, // THREE.Vector3; x/z are the ground position
     heading: 0,
     speed: 0,
@@ -201,18 +240,27 @@ export function updatePlayer(dt) {
   p.group.rotation.y = p.heading;
 
   // The walk cycle: legs and arms swing opposite, scaled by speed.
+  // The knee bends as its leg swings forward, like the pedestrians'.
   const swing = Math.min(1, p.speed / SPRINT) * 0.65;
   const ph = p.walkPhase;
   p.legL.rotation.x = Math.sin(ph) * swing;
   p.legR.rotation.x = -Math.sin(ph) * swing;
+  p.shinL.rotation.x = Math.max(0, -Math.sin(ph)) * 0.9;
+  p.shinR.rotation.x = Math.max(0, Math.sin(ph)) * 0.9;
   p.armL.rotation.x = -Math.sin(ph) * swing * 0.8;
   p.armR.rotation.x = Math.sin(ph) * swing * 0.8;
+  // Elbows stay softly bent, about 15 degrees.
+  p.elbowL.rotation.x = -0.26;
+  p.elbowR.rotation.x = -0.26;
   if (p.punchTimer > 0) {
     p.punchTimer -= dt;
     p.armR.rotation.x = -1.4 * Math.max(0, p.punchTimer / 0.28);
   }
-  // The gun stays level while walking.
-  p.gun.rotation.x = Math.sin(ph * 2) * 0.03 * Math.min(1, p.speed / STROLL);
+  // Aiming: with a pistol in hand, the right arm levels forward and
+  // the gun points where the player faces. Fists punch instead.
+  if (p.weapon === 'pistol' && S.onFoot) {
+    p.armR.rotation.x = -1.35;
+  }
 
   // The flash decays on its own (or stays lit when the staging debug
   // hook holds it open for a screenshot).
@@ -276,7 +324,7 @@ export function muzzleWorldPos(out) {
   // The world position of the gun barrel tip (the flash is a child of
   // the gun, so it sits here too).
   const p = S.player;
-  const tip = new THREE.Vector3(0, 0, 0.75);
+  const tip = new THREE.Vector3(0, 0.05, 0.75);
   p.gun.localToWorld(tip);
   out.copy(tip);
   return out;

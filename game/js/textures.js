@@ -319,10 +319,9 @@ export function facadeMaps(styleIdx) {
       }
     }
   }
-  // A darker plinth at the base, and a few balconies and air-con boxes
-  // for depth: small rectangles with a soft shadow beneath them.
-  pen.fillStyle = 'rgba(0,0,0,0.25)';
-  pen.fillRect(0, SIZE - 60, SIZE, 60);
+  // Balconies and air-con boxes for depth: small rectangles with a
+  // soft shadow beneath them. (No dark plinth at the base — the
+  // ground floor is built in 3D as lit shopfronts instead.)
   for (let i = 0; i < 6; i += 1) {
     const bx = margin + dice() * (SIZE - margin * 2 - 90);
     const by = margin + dice() * (SIZE - margin * 2 - 60);
@@ -342,10 +341,12 @@ export function facadeMaps(styleIdx) {
   const map = wrapTex(canvas);
   const emissiveMap = wrapTex(emitCanvas);
   // Glass curtain walls reflect the sky; painted walls stay matte.
+  // Glass metalness is capped so the towers read as lit glass at
+  // dusk instead of black slabs.
   return {
     map, emissiveMap,
     roughness: style.glass ? 0.12 : 0.85,
-    metalness: style.glass ? 0.78 : 0.05,
+    metalness: style.glass ? 0.45 : 0.05,
   };
 }
 
