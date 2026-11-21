@@ -1,20 +1,20 @@
-// A tiny static server for game/ (Node 22, standard library only), so an entry can be played
-// locally without a build step: `node serve.ts` serves game/ on http://localhost:8080.
-// It sends the MIME types a browser game needs, refuses any path outside game/, and otherwise
-// does nothing clever: this is a development convenience, not a web server for the internet.
+// A small static server for game/ (Node 22, standard library only), so the
+// game can be played locally with no build step: `node serve.ts` puts game/
+// on http://localhost:8080. It answers with the MIME types a browser game
+// needs, turns away any path that escapes game/, and otherwise does nothing
+// fancy: this is a convenience for development, not a server for the open web.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const args = process.argv.slice(2);
-const portIndex = args.indexOf('--port');
-const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
-const portOk = Number.isInteger(requested) && requested > 0 && requested < 65536;
-const port = portOk ? requested : 8080;
+const argv = process.argv.slice(2);
+const flagAt = argv.indexOf('--port');
+const wanted = flagAt === -1 ? 8080 : Number(argv[flagAt + 1]);
+const port = Number.isInteger(wanted) && wanted > 0 && wanted < 65536 ? wanted : 8080;
 
-const MIME: Record<string, string> = {
+const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
@@ -39,8 +39,8 @@ const MIME: Record<string, string> = {
 };
 
 createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  let pathname: string;
+  const url = new URL(request.url || '/', 'http://localhost');
+  let pathname;
   try {
     pathname = decodeURIComponent(url.pathname);
   } catch {
@@ -53,7 +53,7 @@ createServer((request, response) => {
     response.writeHead(403).end('forbidden');
     return;
   }
-  let size: number;
+  let size;
   try {
     const stats = statSync(file);
     if (!stats.isFile()) throw new Error('not a file');
@@ -63,7 +63,7 @@ createServer((request, response) => {
     return;
   }
   response.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
+    'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream',
     'content-length': size,
     'cache-control': 'no-store',
   });

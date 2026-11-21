@@ -4,25 +4,25 @@
 
 # Solmar City
 
-An original open-world crime game built for the [Make GTA 6 bounty](https://make.fun/bounty/gta6-01) on make.fun. A golden-hour coastal city to explore on foot and by car: steal cars, outrun the Solmar PD, run five story missions, and build your cash — all in the browser, from static files, with no network request.
+A home-grown open-world crime game made for the [Make GTA 6 bounty](https://make.fun/bounty/gta6-01) on make.fun. It is a golden-hour city on the coast that you can wander on foot or by car: lift a ride, shake the Solmar PD, work through five story jobs, and grow your cash — all in a desktop browser, served from plain static files, with nothing fetched from the network.
 
-## The game
+## What is in the game
 
-- **The city** — a road-grid city of pastel towers, parks, car parks, a beach and ocean, with landmarks of its own: Solmar Tower, Cafe Luna (neon storefront), the Hideout garage, Solmar Harbor and Solmar General hospital.
-- **Golden-hour atmosphere** — a low warm sun with real long shadows, a gradient dusk sky, lit windows, traffic lights, storefronts and rooftop props; taxis, trucks and two-tone police cruisers with pulsing ground reflections.
-- **On foot and by car** — third-person over-shoulder mouse-orbit camera, walk/run, arcade driving with a handbrake, enter/exit any parked car.
-- **Wanted level** — heat from 0 to 100 becomes 0 to 5 stars. Stealing a car puts you straight on 2 stars; black-and-white cruisers chase, ram and flash big glowing light bars, and getting cornered on foot means BUSTED. Lie low and the heat cools off.
-- **Five story missions** — a delivery, a car-theft getaway, losing the cops, five drops to collect, and a harbor finale, with cash rewards, a bright gold beacon marking the target, free roam and replay after the finale.
-- **Combat** — a pistol with magazine and reserve ammo, reload, punch, muzzle flash bound to the gun barrel, tracers, impact particles, camera shake, and health/ammo/cash pickups.
-- **HUD and sound** — wanted stars on a backing panel, cash, health and ammo with icons, objective with distance, speed in km/h while driving, a live minimap with flashing police dots, toasts, and fully synthesized WebAudio (engine, siren, gunshots, jingle, crashes, horn).
-- **Save** — autosaves to localStorage; Continue from the menu picks up where you left off.
+- **The city** — a grid of pastel towers, parks, car parks, a beach and the sea, with places that belong to it alone: Solmar Tower, the neon Cafe Luna, the Hideout garage, Solmar Harbor and Solmar General hospital.
+- **Golden-hour mood** — a low warm sun throwing long real shadows, a dusk gradient sky, windows glowing, traffic lights, shopfronts and rooftop clutter; taxis, trucks and two-tone police cruisers whose light bars spill colour onto the road.
+- **On foot and behind the wheel** — a third-person over-shoulder camera that orbits with the mouse, walking and running, arcade driving with a handbrake, and the freedom to get into any parked car you find.
+- **Wanted level** — heat from 0 to 100 reads as 0 to 5 stars. Taking a car puts you straight on 2 stars; black-and-white cruisers chase, ram and flash their light bars, and getting cornered on foot means BUSTED. Stay out of sight and the heat fades.
+- **Five story jobs** — a delivery, a getaway in a stolen car, losing the cops, five drops to pick up, and a finale at the harbor, with cash rewards, a bright gold beacon over the target, free roam and replay once the finale is done.
+- **Combat** — a pistol with a magazine and spare ammo, reloading, punching, a muzzle flash fixed to the gun barrel, tracers, impact particles, camera shake, and health, ammo and cash pickups.
+- **HUD and sound** — wanted stars on a backing panel, cash, health and ammo with icons, the objective with its distance, speed in km/h while driving, a live minimap with flashing police dots, toasts, and sound made entirely with WebAudio (engine, siren, gunshots, jingle, crashes, horn).
+- **Save** — autosaves into localStorage; Continue on the menu picks up where you stopped.
 
 ## How to play
 
-Serve `game/` with any static server (for example `node serve.ts` from this repo, or `python3 -m http.server` inside `game/`) and open `index.html` in desktop Chrome.
+Serve `game/` from any static server (for example `node serve.ts` from this repo, or `python3 -m http.server` inside `game/`) and open `index.html` in desktop Chrome.
 
-- **On foot:** WASD move · Shift run · click to lock mouse · move mouse to look · left-click shoot · F punch · R reload · 1 pistol / 2 fists
-- **Driving:** WASD drive · Space handbrake · E get in / out of a car
+- **On foot:** WASD to move · Shift to run · click to lock the mouse · move the mouse to look · left-click to shoot · F to punch · R to reload · 1 pistol / 2 fists
+- **Driving:** WASD to drive · Space for the handbrake · E to get in / out of a car
 - **M** toggles sound.
 
 ## Layout
@@ -30,7 +30,7 @@ Serve `game/` with any static server (for example `node serve.ts` from this repo
 - `game/index.html` — the page, HUD and menus
 - `game/js/state.js` — shared state, constants, wanted heat
 - `game/js/city.js` — the city, landmarks, collision, blob shadows
-- `game/js/player.js` — on-foot character and over-shoulder camera
+- `game/js/player.js` — the on-foot character and over-shoulder camera
 - `game/js/vehicles.js` — cars, driving, enter/exit/steal
 - `game/js/traffic.js` — traffic cars and pedestrians who dodge cars
 - `game/js/police.js` — wanted level, cruisers, BUSTED, officer figure

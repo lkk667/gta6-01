@@ -1,419 +1,446 @@
-// Phase 2 polish: window texture repeated more densely so tower windows read at true scale, plus soft plaster for the cafe facade.
-// Solmar City — procedural canvas textures: asphalt, sidewalks,
-// facades, glow, wheels, plates. Everything is drawn in code, so the
-// game makes zero network requests for art.
-// The look is soft, not pixelated: every surface uses smooth gradients
-// and lightly blurred noise instead of hard square speckles, and the
-// canvases are 1024x1024 so the detail holds up close. A window at
-// dusk is a sky gradient — orange at the bottom fading to deep blue —
-// with the lit ones glowing warm, so the facades catch the sunset
-// instead of looking flat. Filters are Linear + LinearMipmapLinear
-// with anisotropy 8, so the textures stay smooth at glancing angles.
+// Solmar City — procedural canvas textures.
+// Everything here is drawn at runtime on 2D canvases, so the game needs no
+// image downloads: asphalt and pavements, building facades with lit windows,
+// the soft glow sprites, wheel faces and number plates. All generators are
+// seeded, so the same seed always paints the same texture.
 
 import * as THREE from '../vendor/three.module.min.js';
 
-const SIZE = 1024;
+// ---------------------------------------------------------------------------
+// Small helpers (own names, own structure)
+// ---------------------------------------------------------------------------
 
-// A tiny seeded generator (LCG) so the noise is stable per run: the
-// same seed paints the same surfaces every time, so a screenshot taken
-// today matches one taken tomorrow.
-let seedState = 987654321;
-function dice() {
-  seedState = (Math.imul(seedState, 1664525) + 1013904223) >>> 0;
-  return seedState / 4294967296;
+// A tiny deterministic generator: mulberry32. Textures built from it look
+// the same on every load, which keeps screenshots comparable between runs.
+function seededRand(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-// A canvas with a 2d context, ready to paint on.
-function makeCanvas(w, h) {
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  return [canvas, canvas.getContext('2d')];
+function pick(rng, list) {
+  return list[Math.floor(rng() * list.length) % list.length];
 }
 
-// Hex colour -> rgba() string with the given alpha, so a gradient can
-// fade from the colour to transparent instead of to transparent black.
-function hexWithAlpha(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+// Make a blank canvas and hand back both the element and its 2D context.
+function blankCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  return [c, c.getContext('2d')];
 }
 
-// A soft round blotch: a radial gradient that is the colour at full
-// strength in the centre and fades to nothing at the edge. This is the
-// replacement for the old hard 2x2/3x3 fillRect speckles everywhere.
-function softSpot(pen, x, y, radius, colour, alpha) {
-  const grad = pen.createRadialGradient(x, y, 0, x, y, radius);
-  grad.addColorStop(0, hexWithAlpha(colour, alpha));
-  grad.addColorStop(1, hexWithAlpha(colour, 0));
-  pen.fillStyle = grad;
-  pen.beginPath();
-  pen.arc(x, y, radius, 0, Math.PI * 2);
-  pen.fill();
+// Turn a 0xRRGGBB number into an rgba() string.
+function hexA(hex, alpha) {
+  const r = (hex >> 16) & 255;
+  const g = (hex >> 8) & 255;
+  const b = hex & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// Wrap a painted canvas as a texture: linear filtering both ways and
-// anisotropy 8, so it stays smooth at a glancing angle.
-function wrapTex(canvas, repeatX, repeatY) {
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.magFilter = THREE.LinearFilter;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.anisotropy = 8;
+// Paint one soft round blotch: a radial gradient that is strongest in the
+// middle and fades to nothing at the rim.
+function blotch(ctx, x, y, radius, colour, peakAlpha) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  g.addColorStop(0, hexA(colour, peakAlpha));
+  g.addColorStop(0.55, hexA(colour, peakAlpha * 0.55));
+  g.addColorStop(1, hexA(colour, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Give a CanvasTexture repeating wrap and a decent anisotropy, then return it.
+function prepare(tex, srgb) {
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(repeatX || 1, repeatY || 1);
+  tex.anisotropy = 8;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
-export function asphaltMaps() {
-  const [canvas, pen] = makeCanvas(SIZE, SIZE);
-  const [roughCanvas, rough] = makeCanvas(SIZE, SIZE);
-  // The base is a vertical gradient, darker at the edges, so the road
-  // reads as one surface with a worn centre instead of a flat slab.
-  const base = pen.createLinearGradient(0, 0, 0, SIZE);
-  base.addColorStop(0, '#23262b');
-  base.addColorStop(0.5, '#2e3238');
-  base.addColorStop(1, '#23262b');
-  pen.fillStyle = base;
-  pen.fillRect(0, 0, SIZE, SIZE);
-  const roughBase = rough.createLinearGradient(0, 0, 0, SIZE);
-  roughBase.addColorStop(0, '#e2e2e2');
-  roughBase.addColorStop(0.5, '#f0f0f0');
-  roughBase.addColorStop(1, '#e2e2e2');
-  rough.fillStyle = roughBase;
-  rough.fillRect(0, 0, SIZE, SIZE);
-  // Wear: soft light and dark blotches scattered across the surface,
-  // never hard square noise.
-  for (let i = 0; i < 90; i += 1) {
-    const x = dice() * SIZE;
-    const y = dice() * SIZE;
-    const r = 20 + dice() * 70;
-    softSpot(pen, x, y, r, dice() < 0.5 ? '#3a3e45' : '#1a1c20', 0.35);
-    softSpot(rough, x, y, r, dice() < 0.5 ? '#c8c8c8' : '#707070', 0.5);
-  }
-  // Polished tyre bands where the wheels run: two soft horizontal
-  // streaks, slightly lighter and smoother (lower roughness) than the
-  // rest, so the dusk sun catches them.
-  for (const bandY of [SIZE * 0.28, SIZE * 0.72]) {
-    const band = pen.createLinearGradient(0, bandY - 60, 0, bandY + 60);
-    band.addColorStop(0, 'rgba(0,0,0,0)');
-    band.addColorStop(0.5, 'rgba(120,130,145,0.22)');
-    band.addColorStop(1, 'rgba(0,0,0,0)');
-    pen.fillStyle = band;
-    pen.fillRect(0, bandY - 60, SIZE, 120);
-    const roughBand = rough.createLinearGradient(0, bandY - 60, 0, bandY + 60);
-    roughBand.addColorStop(0, 'rgba(0,0,0,0)');
-    roughBand.addColorStop(0.5, 'rgba(40,40,40,0.5)');
-    roughBand.addColorStop(1, 'rgba(0,0,0,0)');
-    rough.fillStyle = roughBand;
-    rough.fillRect(0, bandY - 60, SIZE, 120);
-  }
-  // Rain-wet puddles: irregular soft radial blotches, dark in the
-  // roughness map (wet asphalt ~0.06–0.14) and a touch darker in the
-  // colour map, so the sunset sky pools in them. Dry asphalt stays
-  // rough — the base is near-white in the roughness map.
-  for (let i = 0; i < 26; i += 1) {
-    const px = dice() * SIZE;
-    const py = dice() * SIZE;
-    const pr = 40 + dice() * 130;
-    softSpot(rough, px, py, pr, '#101010', 0.9);
-    softSpot(pen, px, py, pr, '#14161c', 0.35);
-  }
-  // Repair patches: dark rectangles with soft feathered edges, not
-  // hard-edged boxes, plus a few hairline cracks.
-  for (let i = 0; i < 5; i += 1) {
-    const px = dice() * SIZE * 0.8;
-    const py = dice() * SIZE * 0.8;
-    const pw = 120 + dice() * 160;
-    const ph = 80 + dice() * 120;
-    pen.filter = 'blur(2px)';
-    pen.fillStyle = 'rgba(14,15,18,0.55)';
-    pen.fillRect(px, py, pw, ph);
-    pen.filter = 'none';
-    rough.fillStyle = 'rgba(60,60,60,0.6)';
-    rough.fillRect(px, py, pw, ph);
-  }
-  for (let i = 0; i < 12; i += 1) {
-    pen.strokeStyle = 'rgba(10,10,12,0.5)';
-    pen.lineWidth = 2;
-    pen.beginPath();
-    let cx = dice() * SIZE;
-    let cy = dice() * SIZE;
-    pen.moveTo(cx, cy);
-    for (let j = 0; j < 4; j += 1) {
-      cx += (dice() - 0.5) * 120;
-      cy += (dice() - 0.5) * 60;
-      pen.lineTo(cx, cy);
-    }
-    pen.stroke();
-  }
-  // Lane markings: a dashed centre line and two solid edge lines. The
-  // dashes are worn (alpha 0.75) and the edges are feathered, so they
-  // look painted and weathered rather than pasted on.
-  const midY = SIZE / 2;
-  pen.filter = 'blur(1.5px)';
-  pen.fillStyle = 'rgba(230,225,190,0.75)';
-  for (let x = 0; x < SIZE; x += 128) {
-    pen.fillRect(x, midY - 5, 64, 10);
-  }
-  pen.fillStyle = 'rgba(230,225,190,0.55)';
-  pen.fillRect(0, 30, SIZE, 6);
-  pen.fillRect(0, SIZE - 36, SIZE, 6);
-  pen.filter = 'none';
-  return { map: wrapTex(canvas), roughnessMap: wrapTex(roughCanvas) };
+function canvasTexture(canvas, srgb) {
+  return prepare(new THREE.CanvasTexture(canvas), srgb);
 }
+
+// ---------------------------------------------------------------------------
+// Asphalt — colour map + matching roughness map
+// ---------------------------------------------------------------------------
+
+// Wet patches must sit in exactly the same spots on both maps, so the
+// puddle centres are rolled once and shared by the two painters.
+function rollPuddles(rng, count, w, h) {
+  const spots = [];
+  for (let i = 0; i < count; i++) {
+    spots.push({
+      x: 60 + rng() * (w - 120),
+      y: 60 + rng() * (h - 120),
+      r: 42 + rng() * 110,
+      wet: 0.06 + rng() * 0.08,
+    });
+  }
+  return spots;
+}
+
+export function asphaltMaps() {
+  const W = 1024;
+  const H = 1024;
+  const rng = seededRand(20261121);
+  const puddles = rollPuddles(rng, 15, W, H);
+
+  // --- colour map: near-black asphalt, speckled, with soft wet blotches ---
+  const [colour, cc] = blankCanvas(W, H);
+  cc.fillStyle = '#232327';
+  cc.fillRect(0, 0, W, H);
+  // faint large-scale mottling so the road is not one flat tone
+  for (let i = 0; i < 260; i++) {
+    blotch(cc, rng() * W, rng() * H, 30 + rng() * 90, 0x3a3a40, 0.10 + rng() * 0.10);
+  }
+  // fine grit
+  for (let i = 0; i < 9000; i++) {
+    const v = 28 + Math.floor(rng() * 46);
+    cc.fillStyle = `rgba(${v},${v},${v + 6},${0.25 + rng() * 0.4})`;
+    cc.fillRect(rng() * W, rng() * H, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  // worn tyre lanes running along the length of the tile
+  for (const laneX of [W * 0.28, W * 0.72]) {
+    const g = cc.createLinearGradient(laneX - 70, 0, laneX + 70, 0);
+    g.addColorStop(0, 'rgba(10,10,12,0)');
+    g.addColorStop(0.5, 'rgba(10,10,12,0.28)');
+    g.addColorStop(1, 'rgba(10,10,12,0)');
+    cc.fillStyle = g;
+    cc.fillRect(laneX - 70, 0, 140, H);
+  }
+  // wet puddles: cool blue-grey, a touch lighter than the dry road so the
+  // sky sheen reads, soft edge, plus a faint bright rim on one side
+  for (const p of puddles) {
+    blotch(cc, p.x, p.y, p.r, 0x4a5a6e, 0.5);
+    blotch(cc, p.x - p.r * 0.25, p.y - p.r * 0.3, p.r * 0.55, 0x6a7a90, 0.28);
+  }
+
+  // --- roughness map: dry asphalt rough (0.88), puddles slick (0.06-0.14) ---
+  const [rough, rc] = blankCanvas(W, H);
+  const dry = Math.round(0.88 * 255);
+  rc.fillStyle = `rgb(${dry},${dry},${dry})`;
+  rc.fillRect(0, 0, W, H);
+  for (let i = 0; i < 5000; i++) {
+    const v = dry - 12 + Math.floor(rng() * 24);
+    rc.fillStyle = `rgba(${v},${v},${v},0.5)`;
+    rc.fillRect(rng() * W, rng() * H, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  for (const p of puddles) {
+    const wet = Math.round(p.wet * 255);
+    const g = rc.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+    g.addColorStop(0, `rgb(${wet},${wet},${wet})`);
+    g.addColorStop(0.7, `rgb(${Math.round(wet + (dry - wet) * 0.35)},${Math.round(wet + (dry - wet) * 0.35)},${Math.round(wet + (dry - wet) * 0.35)})`);
+    g.addColorStop(1, `rgb(${dry},${dry},${dry})`);
+    rc.fillStyle = g;
+    rc.beginPath();
+    rc.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    rc.fill();
+  }
+
+  return {
+    map: canvasTexture(colour, true),
+    roughnessMap: canvasTexture(rough, false),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Pavement
+// ---------------------------------------------------------------------------
 
 export function sidewalkMap() {
-  const [canvas, pen] = makeCanvas(SIZE, SIZE);
-  // A warm base with a gentle vertical gradient, so the pavement reads
-  // as one surface instead of a flat slab.
-  const base = pen.createLinearGradient(0, 0, 0, SIZE);
-  base.addColorStop(0, '#a89a7f');
-  base.addColorStop(1, '#96886f');
-  pen.fillStyle = base;
-  pen.fillRect(0, 0, SIZE, SIZE);
-  // Each tile drifts a little in tone, and a few soft stains sit on the
-  // surface — all radial fades, never hard square speckles.
-  for (let ty = 0; ty < 4; ty += 1) {
-    for (let tx = 0; tx < 4; tx += 1) {
-      const drift = dice() * 0.08 - 0.04;
-      const tone = drift > 0 ? 'rgba(255,255,255,' + drift.toFixed(2) + ')' : 'rgba(0,0,0,' + (-drift).toFixed(2) + ')';
-      pen.fillStyle = tone;
-      pen.fillRect(tx * 256, ty * 256, 256, 256);
-    }
+  const W = 1024;
+  const H = 1024;
+  const rng = seededRand(977);
+  const [c, ctx] = blankCanvas(W, H);
+
+  // warm stone, gently lighter toward the top edge
+  const base = ctx.createLinearGradient(0, 0, 0, H);
+  base.addColorStop(0, '#9a8a76');
+  base.addColorStop(0.5, '#8a7a66');
+  base.addColorStop(1, '#7a6a58');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, W, H);
+
+  // faint large patches of wear
+  for (let i = 0; i < 90; i++) {
+    blotch(ctx, rng() * W, rng() * H, 40 + rng() * 110, 0x6a5a48, 0.08 + rng() * 0.08);
   }
-  for (let i = 0; i < 24; i += 1) {
-    softSpot(pen, dice() * SIZE, dice() * SIZE, 30 + dice() * 80, dice() < 0.5 ? '#7a6a50' : '#c8b898', 0.3);
+  // tile joints: a regular grid of darker seams
+  ctx.strokeStyle = 'rgba(52,44,36,0.55)';
+  ctx.lineWidth = 3;
+  const step = 128;
+  for (let x = 0; x <= W; x += step) {
+    ctx.beginPath();
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, H);
+    ctx.stroke();
   }
-  // A few hairline cracks, then the tile joints.
-  for (let i = 0; i < 8; i += 1) {
-    pen.strokeStyle = 'rgba(60,50,35,0.4)';
-    pen.lineWidth = 1.5;
-    pen.beginPath();
-    let cx = dice() * SIZE;
-    let cy = dice() * SIZE;
-    pen.moveTo(cx, cy);
-    for (let j = 0; j < 3; j += 1) {
-      cx += (dice() - 0.5) * 100;
-      cy += (dice() - 0.5) * 100;
-      pen.lineTo(cx, cy);
-    }
-    pen.stroke();
+  for (let y = 0; y <= H; y += step) {
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(W, y + 0.5);
+    ctx.stroke();
   }
-  pen.strokeStyle = 'rgba(70,60,45,0.6)';
-  pen.lineWidth = 4;
-  for (let i = 0; i <= 4; i += 1) {
-    pen.beginPath();
-    pen.moveTo(i * 256, 0);
-    pen.lineTo(i * 256, SIZE);
-    pen.stroke();
-    pen.beginPath();
-    pen.moveTo(0, i * 256);
-    pen.lineTo(SIZE, i * 256);
-    pen.stroke();
+  // light seams offset half a tile, for a staggered slab look
+  ctx.strokeStyle = 'rgba(52,44,36,0.28)';
+  ctx.lineWidth = 2;
+  for (let y = step / 2; y <= H; y += step) {
+    ctx.beginPath();
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(W, y + 0.5);
+    ctx.stroke();
   }
-  return wrapTex(canvas);
+  // speckle
+  for (let i = 0; i < 6000; i++) {
+    const v = 110 + Math.floor(rng() * 60);
+    ctx.fillStyle = `rgba(${v},${Math.round(v * 0.9)},${Math.round(v * 0.78)},${0.2 + rng() * 0.3})`;
+    ctx.fillRect(rng() * W, rng() * H, 1 + rng() * 2, 1 + rng() * 2);
+  }
+
+  return canvasTexture(c, true);
 }
 
-// Facade styles, each with a wall colour, a trim colour and a window
-// layout. Windows are the dusk sky in miniature: a vertical gradient
-// from warm orange at the bottom to deep blue at the top, so they
-// reflect the sunset. Lit windows glow warm, and that glow is baked
-// into the emissive map too, so they shine at dusk. Coastal low
-// buildings wear Art Deco pastels (cream, coral pink, pale mint);
-// the glass style is a curtain wall — high metalness, low roughness.
-const STYLES = [
-  { wall: '#d8c8a8', trim: '#b8a888', cols: 4, rows: 5 },
-  { wall: '#d89080', trim: '#b86858', cols: 5, rows: 6 },
-  { wall: '#a0c8a8', trim: '#78a888', cols: 4, rows: 6 },
-  { wall: '#a08a6a', trim: '#7a6248', cols: 5, rows: 5 },
-  { wall: '#7a5a6a', trim: '#5a3a4a', cols: 4, rows: 5 },
-  { wall: '#3a5a7a', trim: '#2a4a6a', cols: 6, rows: 8, glass: true },
+// ---------------------------------------------------------------------------
+// Building facades — dense small windows, lit-window emissive twin
+// ---------------------------------------------------------------------------
+
+const FACADE_STYLES = [
+  { name: 'cream', base: 0xe8dcc0, trim: 0xc8b890, glass: false },
+  { name: 'coral', base: 0xe8a080, trim: 0xc87858, glass: false },
+  { name: 'mint', base: 0xa8d8c0, trim: 0x88b8a0, glass: false },
+  { name: 'glass', base: 0x2a3a4a, trim: 0x5a7a9a, glass: true },
+  { name: 'brick', base: 0x8a4a38, trim: 0x6a3828, glass: false },
 ];
 
-export function facadeMaps(styleIdx) {
-  const style = STYLES[styleIdx % STYLES.length];
-  const [canvas, pen] = makeCanvas(SIZE, SIZE);
-  const [emitCanvas, emit] = makeCanvas(SIZE, SIZE);
-  // The wall: a vertical wash, lighter at the top where the sunset
-  // catches it, with soft tonal drift instead of hard square speckles.
-  const wash = pen.createLinearGradient(0, 0, 0, SIZE);
-  wash.addColorStop(0, style.wall);
-  wash.addColorStop(1, style.trim);
-  pen.fillStyle = wash;
-  pen.fillRect(0, 0, SIZE, SIZE);
-  emit.fillStyle = '#000000';
-  emit.fillRect(0, 0, SIZE, SIZE);
-  for (let i = 0; i < 40; i += 1) {
-    softSpot(pen, dice() * SIZE, dice() * SIZE, 40 + dice() * 90, dice() < 0.5 ? style.trim : style.wall, 0.3);
-  }
-  // Windows in a grid. Unlit ones are the dusk sky gradient; lit ones
-  // are a warm radial glow, and the glow is drawn into the emissive
-  // map as well so they shine.
-  const margin = 90;
-  const winW = (SIZE - margin * 2 - (style.cols - 1) * 40) / style.cols;
-  const winH = (SIZE - margin * 2 - (style.rows - 1) * 36) / style.rows;
-  for (let r = 0; r < style.rows; r += 1) {
-    for (let c = 0; c < style.cols; c += 1) {
-      const x = margin + c * (winW + 40);
-      const y = margin + r * (winH + 36);
-      // The sky reflected in the glass: orange at the bottom, deep
-      // blue at the top.
-      const sky = pen.createLinearGradient(0, y + winH, 0, y);
-      sky.addColorStop(0, '#e87a2a');
-      sky.addColorStop(0.5, '#b85a78');
-      sky.addColorStop(1, '#2a3a6a');
-      pen.fillStyle = sky;
-      pen.fillRect(x, y, winW, winH);
-      // Interior depth, so the window reads as a room, not a sticker:
-      // a warm ceiling light at the top, a furniture shadow at the
-      // bottom, fine blind slats, and a diagonal streak of sky
-      // reflected in the glass.
-      const ceiling = pen.createLinearGradient(0, y, 0, y + winH * 0.32);
-      ceiling.addColorStop(0, 'rgba(255,220,150,0.55)');
-      ceiling.addColorStop(1, 'rgba(255,220,150,0)');
-      pen.fillStyle = ceiling;
-      pen.fillRect(x, y, winW, winH * 0.32);
-      const furniture = pen.createLinearGradient(0, y + winH * 0.7, 0, y + winH);
-      furniture.addColorStop(0, 'rgba(0,0,0,0)');
-      furniture.addColorStop(1, 'rgba(10,8,12,0.55)');
-      pen.fillStyle = furniture;
-      pen.fillRect(x, y + winH * 0.7, winW, winH * 0.3);
-      pen.strokeStyle = 'rgba(20,16,20,0.35)';
-      pen.lineWidth = 2;
-      for (let s = 1; s <= 4; s++) {
-        const sy = y + (winH * s) / 5;
-        pen.beginPath();
-        pen.moveTo(x, sy);
-        pen.lineTo(x + winW, sy);
-        pen.stroke();
-      }
-      pen.save();
-      pen.beginPath();
-      pen.rect(x, y, winW, winH);
-      pen.clip();
-      pen.strokeStyle = 'rgba(255,255,255,0.28)';
-      pen.lineWidth = winW * 0.14;
-      pen.beginPath();
-      pen.moveTo(x + winW * 0.2, y + winH);
-      pen.lineTo(x + winW * 0.8, y);
-      pen.stroke();
-      pen.restore();
-      // A frame around each window.
-      pen.strokeStyle = style.trim;
-      pen.lineWidth = 6;
-      pen.strokeRect(x, y, winW, winH);
-      // About 42% of the windows are lit: a warm radial glow in both
-      // the colour map and the emissive map.
-      if (dice() < 0.42) {
-        const glow = pen.createRadialGradient(x + winW / 2, y + winH / 2, 4, x + winW / 2, y + winH / 2, winW * 0.7);
-        glow.addColorStop(0, 'rgba(255,214,130,0.75)');
-        glow.addColorStop(1, 'rgba(255,180,80,0.2)');
-        pen.fillStyle = glow;
-        pen.fillRect(x, y, winW, winH);
-        const emitGlow = emit.createRadialGradient(x + winW / 2, y + winH / 2, 4, x + winW / 2, y + winH / 2, winW * 0.7);
-        emitGlow.addColorStop(0, 'rgba(255,200,110,0.7)');
-        emitGlow.addColorStop(1, 'rgba(255,170,70,0.15)');
-        emit.fillStyle = emitGlow;
-        emit.fillRect(x, y, winW, winH);
-      }
+// One window slot, shared by the colour map and the emissive map so the lit
+// windows line up exactly with the glass on the facade.
+function rollWindows(rng, cols, rows, cellW, cellH) {
+  const slots = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      slots.push({
+        x: c * cellW + cellW * 0.22,
+        y: r * cellH + cellH * 0.2,
+        w: cellW * 0.56,
+        h: cellH * 0.6,
+        lit: rng() < 0.48,
+        warm: 0.75 + rng() * 0.25,
+        blinds: rng() < 0.4,
+      });
     }
   }
-  // Balconies and air-con boxes for depth: small rectangles with a
-  // soft shadow beneath them. (No dark plinth at the base — the
-  // ground floor is built in 3D as lit shopfronts instead.)
-  for (let i = 0; i < 6; i += 1) {
-    const bx = margin + dice() * (SIZE - margin * 2 - 90);
-    const by = margin + dice() * (SIZE - margin * 2 - 60);
-    pen.fillStyle = 'rgba(0,0,0,0.3)';
-    pen.fillRect(bx + 4, by + 8, 90, 8);
-    pen.fillStyle = style.trim;
-    pen.fillRect(bx, by, 90, 10);
+  return slots;
+}
+
+function paintWindowGlass(ctx, s, style) {
+  // dark frame
+  ctx.fillStyle = 'rgba(30,26,22,0.9)';
+  ctx.fillRect(s.x - 3, s.y - 3, s.w + 6, s.h + 6);
+  if (style.glass) {
+    // curtain-wall pane: cool reflective glass
+    const g = ctx.createLinearGradient(s.x, s.y, s.x + s.w, s.y + s.h);
+    g.addColorStop(0, '#5a7a95');
+    g.addColorStop(0.5, '#3a5a72');
+    g.addColorStop(1, '#6a8aa5');
+    ctx.fillStyle = g;
+    ctx.fillRect(s.x, s.y, s.w, s.h);
+  } else {
+    ctx.fillStyle = '#232c38';
+    ctx.fillRect(s.x, s.y, s.w, s.h);
   }
-  for (let i = 0; i < 5; i += 1) {
-    const ax = margin + dice() * (SIZE - margin * 2 - 60);
-    const ay = margin + dice() * (SIZE - margin * 2 - 40);
-    pen.fillStyle = '#c8c8c8';
-    pen.fillRect(ax, ay, 60, 40);
-    pen.fillStyle = 'rgba(0,0,0,0.2)';
-    pen.fillRect(ax, ay + 40, 60, 4);
+  // muntin cross
+  ctx.fillStyle = 'rgba(30,26,22,0.85)';
+  ctx.fillRect(s.x + s.w / 2 - 1, s.y, 2, s.h);
+  ctx.fillRect(s.x, s.y + s.h / 2 - 1, s.w, 2);
+}
+
+function paintWindowLit(ctx, s, style) {
+  if (!s.lit) return;
+  // warm interior: brighter at the top (ceiling light), darker at the
+  // bottom (furniture shadow), blind slats, and a 45-degree sky streak.
+  const g = ctx.createLinearGradient(s.x, s.y, s.x, s.y + s.h);
+  const top = style.glass ? '#cfe8ff' : '#ffd98a';
+  const mid = style.glass ? '#8ab8d8' : '#ffB85e';
+  g.addColorStop(0, top);
+  g.addColorStop(0.55, mid);
+  g.addColorStop(1, style.glass ? '#2a4a62' : '#7a4a22');
+  ctx.fillStyle = g;
+  ctx.fillRect(s.x, s.y, s.w, s.h);
+  // furniture shadow along the bottom
+  ctx.fillStyle = 'rgba(40,20,8,0.5)';
+  ctx.fillRect(s.x, s.y + s.h * 0.72, s.w, s.h * 0.28);
+  // blind slats
+  if (s.blinds) {
+    ctx.fillStyle = 'rgba(40,28,14,0.45)';
+    for (let y = s.y + 4; y < s.y + s.h - 4; y += 7) {
+      ctx.fillRect(s.x, y, s.w, 2);
+    }
   }
-  const map = wrapTex(canvas);
-  const emissiveMap = wrapTex(emitCanvas);
-  // Glass curtain walls reflect the sky; painted walls stay matte.
-  // Glass metalness is capped so the towers read as lit glass at
-  // dusk instead of black slabs.
+  // diagonal sky-reflection streak
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(s.x, s.y, s.w, s.h);
+  ctx.clip();
+  ctx.fillStyle = 'rgba(255,255,255,0.28)';
+  ctx.translate(s.x + s.w / 2, s.y + s.h / 2);
+  ctx.rotate(-Math.PI / 4);
+  ctx.fillRect(-s.w, -3, s.w * 2, 6);
+  ctx.restore();
+}
+
+export function facadeMaps(styleIdx) {
+  const style = FACADE_STYLES[((styleIdx % FACADE_STYLES.length) + FACADE_STYLES.length) % FACADE_STYLES.length];
+  const W = 1024;
+  const H = 1024;
+  const rng = seededRand(4100 + styleIdx * 131);
+
+  const [colour, cc] = blankCanvas(W, H);
+  const [glow, gc] = blankCanvas(W, H);
+
+  // base wall
+  cc.fillStyle = hexA(style.base, 1);
+  cc.fillRect(0, 0, W, H);
+  // subtle vertical weathering streaks
+  for (let i = 0; i < 40; i++) {
+    blotch(cc, rng() * W, rng() * H, 30 + rng() * 80, 0x000000, 0.05 + rng() * 0.05);
+  }
+  // cornice bands: a proud trim near the top and a plinth at the bottom
+  cc.fillStyle = hexA(style.trim, 1);
+  cc.fillRect(0, 0, W, 26);
+  cc.fillRect(0, 30, W, 8);
+  cc.fillRect(0, H - 22, W, 22);
+  cc.fillStyle = 'rgba(255,255,255,0.18)';
+  cc.fillRect(0, 26, W, 3);
+  // neon tube: a thin glowing line under the cornice on pastel styles
+  if (!style.glass) {
+    const tube = pick(rng, ['#ff5a8a', '#37e0ff', '#ffd23a']);
+    cc.fillStyle = tube;
+    cc.fillRect(0, 44, W, 5);
+    cc.fillStyle = 'rgba(255,255,255,0.5)';
+    cc.fillRect(0, 44, W, 2);
+  }
+
+  // windows: dense and small. The caller repeats the texture 2.2x, so the
+  // grid here is already tight and the repeat makes it tighter still.
+  const cols = style.glass ? 8 : 12;
+  const rows = style.glass ? 10 : 12;
+  const cellW = W / cols;
+  const cellH = H / rows;
+  const slots = rollWindows(rng, cols, rows, cellW, cellH);
+
+  // ground floor: warm lit shop glass and pale pillars, never a black band
+  const groundTop = H - cellH;
+  gc.fillStyle = '#000000';
+  gc.fillRect(0, 0, W, H);
+  for (const s of slots) {
+    if (s.y + s.h > groundTop) {
+      // shopfront: brighter, warmer, fully lit
+      s.lit = true;
+      paintWindowGlass(cc, s, style);
+      paintWindowLit(gc, s, style);
+    } else {
+      paintWindowGlass(cc, s, style);
+      paintWindowLit(gc, s, style);
+    }
+  }
+  // pale pillars between the shopfronts
+  cc.fillStyle = 'rgba(235,228,214,0.9)';
+  for (let c = 0; c <= cols; c++) {
+    cc.fillRect(c * cellW - 5, groundTop, 10, cellH);
+  }
+
   return {
-    map, emissiveMap,
+    map: canvasTexture(colour, true),
+    emissiveMap: canvasTexture(glow, true),
     roughness: style.glass ? 0.12 : 0.85,
     metalness: style.glass ? 0.45 : 0.05,
   };
 }
 
-// One shared radial glow texture (lamps, headlights, light bars): a
-// soft white-hot centre fading to transparent. Callers tint it with
-// the sprite material's colour instead of baking a colour in.
-let sharedGlow = null;
+// ---------------------------------------------------------------------------
+// Glow sprite, wheel face, number plate
+// ---------------------------------------------------------------------------
+
+let cachedGlow = null;
+
 export function glowTexture() {
-  if (sharedGlow) return sharedGlow;
-  const [canvas, pen] = makeCanvas(128, 128);
-  const grad = pen.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.35, 'rgba(255,255,255,0.55)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  pen.fillStyle = grad;
-  pen.fillRect(0, 0, 128, 128);
-  sharedGlow = new THREE.CanvasTexture(canvas);
-  return sharedGlow;
+  if (cachedGlow) return cachedGlow;
+  const [c, ctx] = blankCanvas(128, 128);
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.85)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.28)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  cachedGlow = canvasTexture(c, true);
+  return cachedGlow;
 }
 
-// A wheel: a dark tyre with a lighter rim and five spokes, drawn once
-// and shared by every car.
 export function wheelTexture() {
-  const [canvas, pen] = makeCanvas(128, 128);
-  pen.fillStyle = '#14161a';
-  pen.beginPath();
-  pen.arc(64, 64, 62, 0, Math.PI * 2);
-  pen.fill();
-  pen.fillStyle = '#3a3d42';
-  pen.beginPath();
-  pen.arc(64, 64, 40, 0, Math.PI * 2);
-  pen.fill();
-  pen.fillStyle = '#c8ccd2';
-  pen.beginPath();
-  pen.arc(64, 64, 28, 0, Math.PI * 2);
-  pen.fill();
-  // Five spokes.
-  pen.fillStyle = '#8a8e94';
-  for (let i = 0; i < 5; i += 1) {
-    const a = (i / 5) * Math.PI * 2;
-    pen.save();
-    pen.translate(64, 64);
-    pen.rotate(a);
-    pen.fillRect(-4, -26, 8, 26);
-    pen.restore();
+  const [c, ctx] = blankCanvas(128, 128);
+  // tyre
+  ctx.fillStyle = '#141414';
+  ctx.beginPath();
+  ctx.arc(64, 64, 62, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#2c2c2c';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(64, 64, 58, 0, Math.PI * 2);
+  ctx.stroke();
+  // rim
+  const rim = ctx.createRadialGradient(64, 64, 6, 64, 64, 44);
+  rim.addColorStop(0, '#d8d8d8');
+  rim.addColorStop(0.7, '#9a9a9a');
+  rim.addColorStop(1, '#5a5a5a');
+  ctx.fillStyle = rim;
+  ctx.beginPath();
+  ctx.arc(64, 64, 44, 0, Math.PI * 2);
+  ctx.fill();
+  // five spokes
+  ctx.fillStyle = '#3c3c3c';
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+    ctx.save();
+    ctx.translate(64, 64);
+    ctx.rotate(a);
+    ctx.fillRect(-4, -42, 8, 42);
+    ctx.restore();
   }
-  pen.fillStyle = '#2c2f36';
-  pen.beginPath();
-  pen.arc(64, 64, 8, 0, Math.PI * 2);
-  pen.fill();
-  return new THREE.CanvasTexture(canvas);
+  // hub
+  ctx.fillStyle = '#222222';
+  ctx.beginPath();
+  ctx.arc(64, 64, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#888888';
+  ctx.beginPath();
+  ctx.arc(64, 64, 4, 0, Math.PI * 2);
+  ctx.fill();
+  return canvasTexture(c, true);
 }
 
-// A licence plate: white, with dark text. The code is passed in, so
-// each car gets its own plate.
 export function plateTexture(code) {
-  const [canvas, pen] = makeCanvas(256, 64);
-  pen.fillStyle = '#f2f2f2';
-  pen.fillRect(0, 0, 256, 64);
-  pen.strokeStyle = '#2c2f36';
-  pen.lineWidth = 4;
-  pen.strokeRect(2, 2, 252, 60);
-  pen.fillStyle = '#1c1e22';
-  pen.font = 'bold 36px Arial, sans-serif';
-  pen.textAlign = 'center';
-  pen.textBaseline = 'middle';
-  pen.fillText(code, 128, 34);
-  return new THREE.CanvasTexture(canvas);
+  const [c, ctx] = blankCanvas(256, 64);
+  ctx.fillStyle = '#f8f8f2';
+  ctx.fillRect(0, 0, 256, 64);
+  ctx.strokeStyle = '#1c2a4a';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(3, 3, 250, 58);
+  ctx.fillStyle = '#1c2a4a';
+  ctx.font = 'bold 34px Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(code, 128, 34);
+  return canvasTexture(c, true);
 }
