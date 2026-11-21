@@ -124,7 +124,12 @@ function paintSpeed() {
 
 function paintCrosshair() {
   if (!dom.crosshair) return;
-  const show = S.mode === 'playing' && S.onFoot && S.player && S.player.weapon === 'pistol';
+  const p = S.player;
+  // the crosshair follows the gun: drawn while fighting, gone once the
+  // pistol has been quiet for 2.5 s and the hero holstered it
+  const neverFired = !p || p.lastShotAt === undefined || p.lastShotAt < -90;
+  const freshShot = !!p && (S.time - p.lastShotAt <= 2.5 || S.debug.holdFlash);
+  const show = S.mode === 'playing' && S.onFoot && !!p && p.weapon === 'pistol' && (neverFired || freshShot);
   dom.crosshair.style.display = show ? 'block' : 'none';
 } // end of paintCrosshair()
 

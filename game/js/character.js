@@ -319,7 +319,7 @@ export function assemblePedestrian(role) {
   const shoulderGeo = new THREE.SphereGeometry(0.062, 12, 10);
   for (const s of [-1, 1]) {
     const ball = new THREE.Mesh(shoulderGeo, shirtMat);
-    ball.position.set(s * 0.185, 0.5, 0);
+    ball.position.set(s * 0.2, 0.5, 0);
     chest.add(ball);
   }
   // harbour worker: two reflective bands around the vest
@@ -341,8 +341,11 @@ export function assemblePedestrian(role) {
   function buildArm(sideX) {
     const shoulder = new THREE.Group();
     shoulder.position.set(sideX, 0.5, 0);
-    // arms hang naturally outwards, about 8 degrees from the body
-    shoulder.rotation.z = sideX < 0 ? 0.14 : -0.14;
+    // arms hang naturally outwards, about 8 degrees from the body: the
+    // left arm leans left (negative z-rotation) and the right arm leans
+    // right, so neither arm ever sinks into the chest and both stay
+    // visible from the front and the back.
+    shoulder.rotation.z = sideX < 0 ? -0.14 : 0.14;
     const upper = new THREE.Mesh(latheFor('upperArm', PROFILES.upperArm), armMat);
     shoulder.add(upper);
     const elbow = new THREE.Group();
@@ -358,8 +361,8 @@ export function assemblePedestrian(role) {
     chest.add(shoulder);
     return { shoulder, elbow };
   }
-  const leftArmBuilt = buildArm(-0.21);
-  const rightArmBuilt = buildArm(0.21);
+  const leftArmBuilt = buildArm(-0.23);
+  const rightArmBuilt = buildArm(0.23);
 
   // --- head: its own group above the neck, so it can look around ---
   const head = new THREE.Group();

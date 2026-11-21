@@ -333,11 +333,13 @@ export function stageChase() {
   // wherever the lens happened to drift to, not from behind the car.
   updateCamera(1);
   // Then snap the driving camera itself to the low close chase angle
-  // (5.8 m behind, 2.0 m high, FOV 66 at top speed): the driving
-  // camera eases toward this spot a little per frame, and in headless
-  // only a frame or two runs before the shutter — the ease lands
-  // halfway and the lens ends up pressed on the car's roof. Snapping
-  // here puts it exactly where the driving loop will hold it.
+  // (5.8 m behind, 2.0 m high, FOV 66): the driving camera eases toward
+  // this spot a little per frame, and in headless only a frame or two
+  // runs before the shutter — the ease lands halfway and the lens ends
+  // up pressed on the car's roof. Snapping here puts it exactly where
+  // the driving loop will hold it. (A closer 5.0 m / FOV 64 snap was
+  // tried first and made the escape car read as a flat box, so the
+  // wider original angle is restored.)
   S.camera.position.set(1.8, 2.0, 100 - 5.8);
   S.camera.lookAt(0, 1.1, 108);
   S.camera.fov = 66;
@@ -403,8 +405,9 @@ export function stageCity() {
     break;
   }
   // Foreground interest, so the lower frame is a street, not bare pavement:
-  // a car parked at the left kerb, just ahead of the camera.
-  spawnParkedCar(-4, 1.5, 0, 0x3a7ad8);
+  // a car parked at the left kerb, far enough ahead of the camera to sit
+  // whole in the frame instead of being cropped by the left edge.
+  spawnParkedCar(-3.5, -2, 0, 0x3a7ad8);
   // Street life in frame, close to the player so the flee still reads at
   // the 8 s shutter: two pedestrians crossing ahead, one walking further
   // out, and one more to the side. The shot itself (fireAndHold) makes
@@ -493,12 +496,15 @@ export function stageMission() {
   // banner: the sign's top edge sits at about 38.2 degrees up from
   // the player, and at -0.10 the frame top reaches about 39.5 degrees,
   // clearing it. The street still fills the lower half.
-  // The camera sits closer (7 m, not 10 m) so it rides higher off the
-  // ground: at 10 m the up-tilt put the lens almost on the pavement
-  // and the near road washed out white at the glancing angle; at 7 m
+  // The camera sits closer (5.5 m, not 7 m) so it rides higher off the
+  // ground: at 7 m the up-tilt put the lens almost on the pavement
+  // and the near road washed out white at the glancing angle; at 5.5 m
   // the lens is half a metre up and the foreground reads as street.
   S.camPitch = -0.10;
-  S.camDist = 7;
+  S.camDist = 5.5;
+  // mission complete is a celebration, not a gunfight: the pistol is
+  // holstered, so no gun and no crosshair in the frame
+  S.player.weapon = "fists";
   // Street life: a talking pair further down the road for depth, and
   // three waiters in the lower frame close to the lens — one on each
   // side of the road just ahead of the player, and one further up the
@@ -524,19 +530,18 @@ export function stageMission() {
   hero.pos.z = -80;
   hero.group.position.set(-12, 0, -80);
   hero.heading = Math.PI / 2;
-  // A car parked in the lower-right foreground, far enough down the
-  // road (about 19 m from the lens now) that it reads whole — roof,
-  // plate and all — instead of being cropped by the frame edge, and
-  // angled a quarter-turn toward the camera so it shows a three-quarter
-  // view instead of a flat side. It sits low enough (roof ~1.5 m) that
-  // it never hides the tower.
-  spawnParkedCar(-8, -75.5, Math.PI / 2 + 0.25, 0xd84a4a, "sedan");
-  // A second car in the lower-left foreground, the same distance down
-  // the road on the far kerb, angled the other way, so the bottom of
-  // the frame has cars on both sides instead of one car and a wide
-  // empty stretch of tarmac. It sits low enough (roof ~1.5 m) that it
-  // never hides the tower.
-  spawnParkedCar(-6, -84.5, Math.PI / 2 - 0.25, 0x3a7ad8, "sedan");
+  // Two cars flanking the hero down the road, both facing the camera so
+  // the lens sees their FRONTS (headlights, grille, plate) instead of
+  // flat rear slabs. Heading -PI/2: the car's local +Z (headlights) maps
+  // to world west, toward the lens. The +PI/2 headings tried in the
+  // previous run put the rears to the lens (verified: identical blank
+  // slabs), so -PI/2 is the correct sign — the earlier -PI/2 run only
+  // looked blank because the headlights sat flush inside the nose.
+  // The red car sits 10 m east and 4 m south of the hero (right of
+  // frame), the blue car 10 m east and 4 m north (left of frame); both
+  // are low enough (roof ~1.5 m) that they never hide the tower.
+  spawnParkedCar(-2, -76, -Math.PI / 2, 0xd84a4a, "sedan");
+  spawnParkedCar(-2, -84, -Math.PI / 2, 0x3a7ad8, "sedan");
   // The completion banner stands alone. The objective line is left
   // blank on purpose: its pill sits across the very top of the frame,
   // exactly where the tower sign now lands, and would hide the sign's
@@ -580,7 +585,14 @@ export function stageFoot() {
   // and the sign's far corner is the first thing to go.
   S.camYaw = -0.08; // camera south of the player, looking north at the sign
   S.camPitch = -0.03;
-  S.camDist = 14;
+  // Close (5 m) so the hero fills about a third of the frame instead of
+  // shrinking into the middle distance — at 5 m a 1.8 m hero spans ~32%
+  // of the 62-degree vertical field — while the rooftop sign, 23 m
+  // ahead of the lens, still fits under the top of the frame.
+  S.camDist = 5;
+  // a quiet walk to the cafe, not a gunfight: pistol holstered, so no
+  // gun and no crosshair in the frame
+  S.player.weapon = "fists";
   S.objectiveText = "";
   S.objectiveDist = null;
   // Cafe street life, each doing something different: a talking pair at

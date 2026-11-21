@@ -217,10 +217,14 @@ export function shoot() {
   }
   S.magazine -= 1;
   addHeat(2);
-  // Muzzle flash: starburst plus light, held open briefly by updateCombat.
+  // Muzzle flash: a small radial glow plus light, held open briefly by
+  // updateCombat. The shot also stamps the time (for the auto-holster)
+  // and starts the smoke puffs.
   S.player.flashMat.opacity = 0.95;
   S.player.flashLight.intensity = 10;
   S.player.flashTimer = 0.06;
+  S.player.lastShotAt = S.time;
+  S.player.smokeTimer = 0.35;
   shakeLeft = 0.12;
   if (S.audio) S.audio.gunshot();
   // A gunshot in the open is witnessed: anyone close runs and reports it.
@@ -333,9 +337,15 @@ export function updateCombat(dt) {
         S.player.flashLight.intensity = 0;
       }
     }
-    // The gun is only in hand on foot with the pistol selected.
+    // The gun is only in hand on foot with the pistol selected — and it
+    // holsters itself 2.5 s after the last shot, so a quiet walk or a
+    // mission-complete celebration never shows a gun and a crosshair.
+    // A staged gunfight (holdFlash) keeps it drawn for the camera.
     if (S.player.gun) {
-      S.player.gun.visible = S.onFoot && S.player.weapon === 'pistol';
+      const neverFired = S.player.lastShotAt === undefined || S.player.lastShotAt < -90;
+      const freshShot = S.time - S.player.lastShotAt <= 2.5;
+      const gunOut = S.player.weapon === "pistol" && (neverFired || freshShot || S.debug.holdFlash);
+      S.player.gun.visible = S.onFoot && gunOut;
     }
   }
   // Tracer fade.

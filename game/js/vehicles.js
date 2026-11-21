@@ -284,6 +284,29 @@ function buildBodywork(model, paintHex, width, length) {
     shell.add(skirt);
   }
 
+  // dark intake grille on the nose, so the front face never reads as a
+  // blank slab, plus a slim beltline crease along each flank to break
+  // the flat side panel. Both sit PROUD of the nose (the grille used to
+  // sit at half - 0.01, barely 0.02 m out, and read as part of the slab).
+  const grille = new THREE.Mesh(
+    new THREE.BoxGeometry(width * 0.5, 0.18, 0.06),
+    trimMaterial(0x0e1013, 0.5),
+  );
+  grille.position.set(0, 0.52, half + 0.02);
+  shell.add(grille);
+  const grilleBar = new THREE.Mesh(
+    new THREE.BoxGeometry(width * 0.5, 0.03, 0.07),
+    trimMaterial(0x8a8f96, 0.3),
+  );
+  grilleBar.position.set(0, 0.52, half + 0.03);
+  shell.add(grilleBar);
+  const beltTrim = trimMaterial(0x9aa0a8, 0.25);
+  for (const s of [-1, 1]) {
+    const crease = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, length * 0.62), beltTrim);
+    crease.position.set(s * (width / 2 + 0.01), 0.72, 0);
+    shell.add(crease);
+  }
+
   return { shell, belt, roofY };
 }
 
@@ -345,12 +368,17 @@ function buildTruckBody(paintHex) {
 
 function addHeadlights(shell, half, width) {
   const lampMat = new THREE.MeshStandardMaterial({
-    color: 0xfff6d8, emissive: 0xffe9a8, emissiveIntensity: 1.6,
+    color: 0xfff6d8, emissive: 0xffe9a8, emissiveIntensity: 2.4,
     roughness: 0.2, metalness: 0.4,
   });
   for (const s of [-1, 1]) {
-    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.09, 0.06), lampMat);
-    lamp.position.set(s * (width / 2 - 0.42), 0.66, half - 0.03);
+    // The lamp box is 0.06 deep; it must PROTRUDE from the nose, not sit
+    // flush with it. At z = half - 0.03 its front face was coplanar with
+    // the body's front face (z = half), so it z-fought and was invisible
+    // — the red car's front read as a blank slab. At half + 0.02 it
+    // sticks out 0.05 m and the warm LED reads clearly.
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.06), lampMat);
+    lamp.position.set(s * (width / 2 - 0.42), 0.66, half + 0.02);
     shell.add(lamp);
     // faint warm cone on the road ahead
     const cone = new THREE.Mesh(
@@ -455,14 +483,15 @@ function addLightBar(shell, roofY, width) {
       map: glowTexture(), color: hex, transparent: true, opacity: 0.9,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }));
-    spr.scale.set(0.9, 0.9, 1);
+    // big halos so the red/blue reads across the whole chase frame
+    spr.scale.set(2.8, 2.8, 1);
     spr.position.set(x, roofY + 0.12, 0.1);
     shell.add(spr);
     return spr;
   }
   function groundPatch(hex, x) {
     const patch = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.4, 2.4),
+      new THREE.PlaneGeometry(3.5, 2.2),
       new THREE.MeshBasicMaterial({
         color: hex, transparent: true, opacity: 0,
         blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
@@ -646,6 +675,9 @@ export function enterCar(ride) {
   S.player.pos.z = ride.position.z;
   S.player.pos.y = 0;
   S.player.inCar = true;
+  // the driver hides entirely while driving: no head or shoulders can
+  // ever poke through the roof in the chase cover
+  if (S.player.group) S.player.group.visible = false;
   addHeat(34); // stealing a car puts the player straight on 2 stars
 }
 
@@ -663,6 +695,8 @@ export function exitCar() {
   S.player.inCar = false;
   S.currentCar = null;
   S.onFoot = true;
+  // stepping out brings the body back
+  if (S.player.group) S.player.group.visible = true;
 }
 
 // ---------------------------------------------------------------------------

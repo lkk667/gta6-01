@@ -82,7 +82,7 @@ function rollPuddles(rng, count, w, h) {
     spots.push({
       x: 60 + rng() * (w - 120),
       y: 60 + rng() * (h - 120),
-      r: 42 + rng() * 110,
+      r: 90 + rng() * 130,
       wet: 0.06 + rng() * 0.08,
     });
   }
@@ -93,7 +93,7 @@ export function asphaltMaps() {
   const W = 1024;
   const H = 1024;
   const rng = seededRand(20261121);
-  const puddles = rollPuddles(rng, 15, W, H);
+  const puddles = rollPuddles(rng, 6, W, H);
 
   // --- colour map: near-black asphalt, speckled, with soft wet blotches ---
   const [colour, cc] = blankCanvas(W, H);
@@ -118,11 +118,11 @@ export function asphaltMaps() {
     cc.fillStyle = g;
     cc.fillRect(laneX - 70, 0, 140, H);
   }
-  // wet puddles: cool blue-grey, a touch lighter than the dry road so the
-  // sky sheen reads, soft edge, plus a faint bright rim on one side
+  // wet puddles: few, broad and soft, a touch lighter than the dry road
+  // so the sky sheen reads — never small hard-edged pale ovals in a row
   for (const p of puddles) {
-    blotch(cc, p.x, p.y, p.r, 0x4a5a6e, 0.5);
-    blotch(cc, p.x - p.r * 0.25, p.y - p.r * 0.3, p.r * 0.55, 0x6a7a90, 0.28);
+    blotch(cc, p.x, p.y, p.r, 0x4a5a6e, 0.32);
+    blotch(cc, p.x - p.r * 0.25, p.y - p.r * 0.3, p.r * 0.55, 0x6a7a90, 0.10);
   }
 
   // --- roughness map: dry asphalt rough (0.88), puddles slick (0.06-0.14) ---
